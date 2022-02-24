@@ -1,0 +1,9 @@
+*.cpython-36.pyc
+*.ipynb_checkpoints
+*.pyc
+*.txt
+*.json
+*.zip
+*.pt
+__pycache__
+report

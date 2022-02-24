@@ -1,0 +1,110 @@
+src_vocab: preprocessed/idl/run/idl.vocab.src
+tgt_vocab: preprocessed/idl/run/idl.vocab.tgt
+
+both_embeddings: glove/glove.6B.300d.txt
+# to set src and tgt embeddings separately:
+# src_embeddings: ...
+# tgt_embeddings: ...
+
+# supported types: GloVe, word2vec
+embeddings_type: "GloVe"
+
+# Model/Embeddings
+word_vec_size: 300  # Word embedding size for src and tgt
+share_vocab: True
+share_embeddings: True  # Share embeddings from src and tgt
+
+# Model/Embedding Features
+feat_vec_size: 20  # Attribute embedding size
+feat_merge: mlp  # Merge action for incorporating feature embeddings [concat|sum|mlp]
+feat_merge_activation: ReLU
+
+
+# Model Structure
+model_dtype: fp32
+param_init: 0.1  # Uniform distribution with support (-param_init, +param_init)
+
+# We put sizes we wish to change manually at -1
+layers: -1
+enc_layers: -1
+heads: -1
+glu_depth: -1
+
+# Encoder sizes
+transformer_ff: 1024  # Size of hidden transformer feed-forward
+units_layers: 2
+chunks_layers: 2
+units_head: 2
+chunks_head: 2
+units_glu_depth: 1
+chunks_glu_depth: 1
+
+# Decoder sizes
+dec_layers: 2
+rnn_size: 300
+input_feed: 1
+bridge: True
+rnn_type: LSTM
+
+
+# Model/Attention
+global_attention: general  # Type of attn to use [dot|general|mlp|none]
+global_attention_function: softmax  # [softmax|sparsemax]
+self_attn_type: scaled-dot  # self attn type in transformer [scaled-dot|average]
+generator_function: softmax
+use_pos: True  # whether using attributes in attention layers
+
+# Model/Copy
+copy_attn: True
+reuse_copy_attn: True  # Reuse standard attention for copy
+copy_attn_force: True  # When available, train to copy
+
+#  Files and logs
+data:
+  train:
+    path_src: datasets/idl/src-train.txt
+    path_tgt: datasets/idl/tar-train.txt
+  valid:
+    path_src: datasets/idl/src-valid.txt
+    path_tgt: datasets/idl/tar-valid.txt
+ # path to datafile from preprocess.py
+save_data: True
+save_model: ./  # path to store checkpoints
+log_file: ./log.txt
+
+report_every: 50  # log current loss every X steps
+save_checkpoint_steps: 500  # save a cp every X steps
+
+
+# Gpu related:
+gpu_ranks: [0]  # ids of gpus to use
+world_size: 1  # total number of distributed processes
+gpu_backend: nccl  # type of torch distributed backend
+gpu_verbose_level: 0
+master_ip: localhost
+master_port: 10000
+seed: 123
+
+
+# Optimization & training
+batch_size: 32
+batch_type: sents
+normalization: sents
+accum_count: [2]  # Update weights every X batches
+accum_steps: [0]  # steps at which accum counts value changes
+valid_steps: 500 # run models on validation set every X steps
+train_steps: 30000
+optim: adam
+max_grad_norm: 5
+dropout: [0.5]
+adam_beta1: 0.9
+adam_beta2: 0.999
+label_smoothing: 0.0
+average_decay: 0
+average_every: 1
+
+# Learning rate
+learning_rate: 0.001
+learning_rate_decay: 0.5  # lr *= lr_decay
+start_decay_step: 5000
+decay_steps: 10000
