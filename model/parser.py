@@ -21,8 +21,9 @@ class Opts(ArgumentParser):
     dropout = [0.5]
     batch_size = 8
     num_epochs=10
-    learning_rate = 0.001
+    learning_rate = 0.01
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    save_path = "model/models/"
 
     def __init__(self) -> None:
         super().__init__(self)

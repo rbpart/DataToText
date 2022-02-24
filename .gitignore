@@ -7,3 +7,4 @@
 *.pt
 __pycache__
 report
+runs/*
