@@ -2,12 +2,12 @@ from setuptools import find_packages
 from setuptools import setup
 
 setup(
-    name='lol',
+    name='DataToText',
     packages=find_packages(),
-    version='0.3.1',
-    author='idl',
+    version='0.1',
+    author='Ruben Partouche',
     author_email='rpartouche@icebergdatalab.com',
-    description='data_extractor',
+    description='',
     long_description_content_type='text/markdown',
     install_requires=[
     ],
