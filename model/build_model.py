@@ -6,9 +6,9 @@ import torch.nn as nn
 import torch
 from model.dataset import IDLDataset
 from torch.nn import Embedding
-from model.parser import Opts
+from model.parser import HyperParameters
 
-def build_embeddings(opt: Opts, loader: IDLDataset, for_encoder=True):
+def build_embeddings(opt: HyperParameters, loader: IDLDataset, for_encoder=True):
     """
     Args:
         opt: the option in current environment.
@@ -71,7 +71,7 @@ def build_generator(opts, loader:IDLDataset) -> nn.Module:
         nn.Linear(opts.rnn_size, len(loader.tgt_vocab)),
         nn.LogSoftmax(dim=-1))
 
-def build_model(opts: Opts, loader: IDLDataset):
+def build_model(opts: HyperParameters, loader: IDLDataset):
 
     decoder = build_decoder(opts,loader)
     encoder = build_encoder(opts,loader)

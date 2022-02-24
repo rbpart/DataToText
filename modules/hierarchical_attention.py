@@ -1,6 +1,6 @@
 from modules.sparse_activations import sparsemax
 from torch.nn.utils.rnn import pad_sequence
-from model.parser import Opts
+from model.parser import HyperParameters
 import torch
 
 def aeq(*args):
@@ -112,7 +112,7 @@ class HierarchicalAttention(torch.nn.Module):
         super().__init__()
         assert not coverage
 
-        self.ent_size = Opts.ENT_SIZE
+        self.ent_size = HyperParameters.ENT_SIZE
 
         self.use_pos = use_pos
 

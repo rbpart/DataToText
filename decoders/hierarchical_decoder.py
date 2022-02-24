@@ -6,7 +6,7 @@ from modules.hierarchical_attention import HierarchicalAttention
 from decoders.stacked import StackedLSTM, StackedGRU
 from model.utils import aeq, sequence_mask
 from torch.nn.utils.rnn import pad_sequence
-from model.parser import Opts
+from model.parser import HyperParameters
 
 class ContainsNaN(Exception):
     pass
@@ -51,7 +51,7 @@ class HierarchicalRNNDecoder(RNNDecoderBase):
             attentional=attn_type != "none" and attn_type is not None)
 
         assert not coverage_attn
-        self.ent_size = Opts.ENT_SIZE
+        self.ent_size = HyperParameters.ENT_SIZE
 
         self.bidirectional_encoder = bidirectional_encoder
         self.num_layers = num_layers

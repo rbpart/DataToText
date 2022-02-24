@@ -6,13 +6,13 @@ from torchtext.vocab import Vocab
 from torchtext.vocab import build_vocab_from_iterator
 import torch
 from tqdm import tqdm
-from model.parser import Opts
+from model.parser import HyperParameters
 
 Entity =  namedtuple('Entity',('data','tags'))
 
 class IDLDataset(Dataset):
 
-    def __init__(self,opts:Opts, type='valid', transform = None) -> None:
+    def __init__(self,opts:HyperParameters, type='valid', transform = None) -> None:
         self.transform = transform
         self.opts = opts
         self.device = opts.device

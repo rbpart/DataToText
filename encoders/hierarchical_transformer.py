@@ -3,7 +3,7 @@ from torch.nn import MultiheadAttention
 
 import torch, copy
 from itertools import tee
-from model.parser import Opts
+from model.parser import HyperParameters
 import torch.nn as nn
 from model.utils import aeq,sequence_mask
 
@@ -155,7 +155,7 @@ class HierarchicalTransformerEncoder(nn.Module):
                  units_glu_depth=-1, chunks_glu_depth=-1, dropout=.5):
         super().__init__()
         self.embeddings = embeddings
-        self.ent_size = Opts.ENT_SIZE
+        self.ent_size = HyperParameters.ENT_SIZE
 
         self.unit_encoder = TransformerEncoder(hidden_size=embeddings.embedding_size,
                                                heads=units_heads,

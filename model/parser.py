@@ -2,7 +2,7 @@
 from argparse import ArgumentParser
 import torch
 
-class Opts(ArgumentParser):
+class HyperParameters(ArgumentParser):
     ENT_SIZE = 7
     base = 'datasets/idl/'
     types = ['train','valid','test']
