@@ -1,18 +1,28 @@
+#%%
 from model.model import DataToTextModel
 from modules.table_embeddings import TableEmbeddings
 from decoders.hierarchical_decoder import HierarchicalRNNDecoder
 from encoders.hierarchical_transformer import HierarchicalTransformerEncoder
 import torch.nn as nn
-import torch
 from model.dataset import IDLDataset
 from torch.nn import Embedding
 from model.parser import HyperParameters
+from torchtext.vocab import Vectors
+
+
+def load_pretrained(path, dataset:IDLDataset, new_embedding: nn.Embedding):
+    pretrained = Vectors(path)
+    assert pretrained.dim == new_embedding.embedding_dim
+    tgt_words = dataset.tgt_vocab.get_itos()
+    dataset_vocab_vectors = pretrained.get_vecs_by_tokens(tgt_words,lower_case_backup=True)
+    mask = (dataset_vocab_vectors != 0).any(dim=1)
+    new_embedding.weight[mask].data = dataset_vocab_vectors[mask]
+    return new_embedding
 
 def build_embeddings(opt: HyperParameters, loader: IDLDataset, for_encoder=True):
     """
     Args:
         opt: the option in current environment.
-        text_field(TextMultiField): word and feats field.
         for_encoder(bool): build Embeddings for encoder or decoder?
     """
     if for_encoder:
@@ -46,11 +56,15 @@ def build_embeddings(opt: HyperParameters, loader: IDLDataset, for_encoder=True)
     word_padding_idx = loader.tgt_vocab([loader.tgt_pad_word])[0]
     num_embs = len(loader.tgt_vocab)
 
-    return Embedding(
+    embedding = Embedding(
         num_embeddings=num_embs,
         embedding_dim=emb_dim,
         padding_idx=word_padding_idx
     )
+    if opt.pretrained_tgt_embeddings_path:
+        embedding = load_pretrained(opt.pretrained_tgt_embeddings_path, loader, embedding)
+
+    return embedding
 
 
 def build_encoder(opts,loader:IDLDataset) -> nn.Module :
@@ -76,8 +90,7 @@ def build_model(opts: HyperParameters, loader: IDLDataset):
     decoder = build_decoder(opts,loader)
     encoder = build_encoder(opts,loader)
     generator = build_generator(opts,loader)
-    model = DataToTextModel(encoder,decoder,generator)
-    model.to(opts.device)
+    model = DataToTextModel(encoder,decoder,generator,device = opts.device)
     return model
 
 

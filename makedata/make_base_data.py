@@ -3,59 +3,50 @@ import os
 import json
 import torch
 import re
+from collections import namedtuple
 from sklearn.model_selection import train_test_split
-from spacy.tokens import doc
-import en_core_web_lg
 from tqdm import tqdm
 from makedata.elastic import Fetcher
-from main.parser import Opts
-import warnings
-warnings.filterwarnings("ignore", message=r"\[W008\]", category=UserWarning)
-nlp = en_core_web_lg.load()
+from model.parser import HyperParameters
+from torchtext.vocab import build_vocab_from_iterator, Vocab
+from joblib import Parallel, delayed
 es = Fetcher()
 fields = es.fields
 
-device = torch.device('cuda')
-print('Cuda available :', torch.cuda.is_available())
 DATAPATH = 'datasets/idl/'
-PREPROCESSED_DATAPATH = 'preprocessed/idl/'
-DELIM = "|" #It's not the regular | symbol
-ENT_SIZE= Opts.ENT_SIZE
-def makedir():
-    if not os.path.isdir('preprocessed/'):
-        os.mkdir('preprocessed/')
-    if not os.path.isdir(PREPROCESSED_DATAPATH):
-        os.mkdir(PREPROCESSED_DATAPATH)
+DELIM = "|"
+ENT_SIZE= HyperParameters.ENT_SIZE
 
-def train_test_valid_split(*data, train_size=0.7, valid_size=0.15, test_size=0.15, save=True):
-    train, test_valid, tar_train, tar_train_valid = train_test_split(*data,train_size=train_size,shuffle=True, random_state=42)
-    test, valid, tar_test, tar_valid = train_test_split(test_valid, tar_train_valid, train_size=test_size/(valid_size+test_size), random_state=42)
-    to_return = (train, test, valid, tar_train, tar_test, tar_valid)
+def train_test_split_save(*data, train_size=0.85, save=True):
+    train, test, tar_train, tar_test = train_test_split(*data,train_size=train_size,shuffle=True, random_state=42)
+    to_return = (train, test, tar_train, tar_test)
     if save:
         open(DATAPATH+'src-train.txt','w').write('\n'.join(train))
         open(DATAPATH+'src-test.txt','w').write('\n'.join(test))
-        open(DATAPATH+'src-valid.txt','w').write('\n'.join(valid))
-        open(DATAPATH+'tar-train.txt','w').write('\n'.join(tar_train))
-        open(DATAPATH+'tar-test.txt','w').write('\n'.join(tar_test))
-        open(DATAPATH+'tar-valid.txt','w').write('\n'.join(tar_valid))
+        open(DATAPATH+'tgt-train.txt','w').write('\n'.join(tar_train))
+        open(DATAPATH+'tgt-test.txt','w').write('\n'.join(tar_test))
     return to_return
 
 def preprocess(dataset='idl', to_drop = []):
     error = 0
     with open(f'./datasets/{dataset}/comments.json', 'r') as json_file:
         file = json.load(json_file)
-        raw, source, target = [], [], []
-        for data in tqdm(file):
-            try:
-                data['es_data'] = es.fetch_data(data)
-                data['country'] = es.fetch_country(data)
-                raw.append(data)
-                source.append(build_source(data))
-                target.append(re.sub('\n','',data['comment']).lower())
-            except Exception as e:
-                error += 1
-    print(error)
+        preprocessed = Parallel(n_jobs=-1)(delayed(preprocess_one)(data) for data in tqdm(file))
+    preprocessed = [t for t in preprocessed if t is not None]
+    preprocessed = list(zip(*preprocessed))
+    file, source, target = preprocessed[0], preprocessed[1], preprocessed[2]
     return(file,source, target)
+
+def preprocess_one(data):
+    try:
+        data['es_data'] = es.fetch_data(data)
+        data['country'] = es.fetch_country(data)
+        raw = data
+        source = build_source(data)
+        target = re.sub('\n','',data['comment']).lower()
+        return (raw,source,target)
+    except Exception as e:
+        return None
 
 def build_source(data):
     tar = ''
@@ -142,13 +133,46 @@ def impact_percentage_index(index:dict):
 
     return res
 
+Entity =  namedtuple('Entity',('data','tags'))
+
+def _load_entity( entity:str, info_token = ' ', split_token = '|'):
+    data, tags = [], []
+    for info in entity.split(info_token):
+        data.append(info.split(split_token)[0])
+        tags.append(info.split(split_token)[1])
+    return data, tags
+
+def _load_entities(line:str,entity_token = '<ent>|<ent>'):
+    return [Entity(*_load_entity(entity.strip())) for entity in line.split(entity_token) if entity != '']
+
+def vocab_src(data):
+    samples = [_load_entities(line.strip()) for line in tqdm(data) if line != '']
+    src_vocab : Vocab = build_vocab_from_iterator([entity.data for sample in samples for entity in sample ])
+    src_vocab_feat : Vocab = build_vocab_from_iterator([entity.tags for sample in samples for entity in sample ])
+    return src_vocab, src_vocab_feat
+
+def _process(line:str):
+    return ['<bos>'] + line.split(' ') + ['<eos>']
+
+def vocab_tgt(data):
+    samples = [_process(line) for line in tqdm(data) if line != '']
+    tgt_vocab : Vocab = build_vocab_from_iterator(samples,specials=['<unk>','<blank>','<bos>','<eos>'])
+    tgt_vocab.set_default_index(tgt_vocab['<unk>'])
+    return tgt_vocab
+
+def build_vocabs(src,tgt, save = True):
+    srcv,srvf = vocab_src(src)
+    tgtv = vocab_tgt(tgt)
+    if save:
+        torch.save(srcv,DATAPATH+'/src_word.vocab.pt')
+        torch.save(srvf,DATAPATH+'/src_feat.vocab.pt')
+        torch.save(tgtv,DATAPATH+'/tgt_word.vocab.pt')
 
 if __name__ == '__main__':
-    makedir()
     raw, data, target = preprocess()
-    items = train_test_valid_split(data,target,save=True)
-    os.system("onmt_build_vocab -config preprocess.yml")
-
-
+    build_vocabs(data,target)
+    items = train_test_split_save(data,target,save=True)
+    with open(DATAPATH+'comments_and_data.json','w') as file:
+        json.dump(items[0],file)
 
 # %%

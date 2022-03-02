@@ -116,7 +116,7 @@ def block_eye(n, size):
     """
     m1 = torch.ones(n, size, 1, size)
     m2 = torch.eye(n).view(n, 1, n, 1)
-    return (m1*m2).view(n*size, n*size).to(torch.uint8)
+    return (m1*m2).view(n*size, n*size).to(torch.bool)
 
 
 def build_pad_mask(source, ent_size, pad_idx):
@@ -130,7 +130,7 @@ def build_pad_mask(source, ent_size, pad_idx):
                   .contiguous()
                   .view(source.size(1), -1, ent_size)
                   .eq(pad_idx))
-    mask[:, :, 0] = 1  # we also mask the <ent> token
+    # mask[:, :, 0] = 1  # we also mask the <ent> token
     return mask
 
 
@@ -139,7 +139,7 @@ def build_chunk_mask(lengths, ent_size):
     [bsz, n_ents, n_ents]
     Filled with -inf where self-attention shouldn't attend, a zeros elsewhere.
     """
-    ones = lengths // ent_size
+    ones = torch.div(lengths, ent_size, rounding_mode='floor')
     ones = sequence_mask(ones).unsqueeze(1).repeat(1, ones.max(), 1).to(lengths.device)
     mask = torch.full(ones.shape, float('-inf')).to(lengths.device)
     mask.masked_fill_(ones, 0)

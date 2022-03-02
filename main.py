@@ -1,5 +1,4 @@
 #%%
-from torch.utils.data import DataLoader
 import torch.nn as nn
 import torch
 from model.parser import HyperParameters
@@ -12,18 +11,17 @@ if __name__=="__main__":
     writer = SummaryWriter()
     hparameters = HyperParameters()
 
-    train_dataset = IDLDataset(hparameters, 'train')
-    valid_dataset = IDLDataset(hparameters, 'valid')
+    dataset = IDLDataset(hparameters, 'train')
     test_dataset = IDLDataset(hparameters, 'test')
 
-    model = build_model(hparameters,train_dataset)
-    criterion = nn.NLLLoss(ignore_index=train_dataset.tgt_vocab([train_dataset.tgt_pad_word])[0],
+    model = build_model(hparameters,dataset)
+    criterion = nn.NLLLoss(ignore_index=dataset.tgt_vocab([dataset.tgt_pad_word])[0],
                         reduction="sum")
     optim = torch.optim.Adam(model.parameters(), lr=hparameters.learning_rate)
-    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim,lambda epoch: 0.99**epoch)
+    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim,[lambda epoch: 0.95**epoch])
 
 
-    trainer = Trainer(hparameters, train_dataset, valid_dataset, test_dataset,
+    trainer = Trainer(hparameters, dataset, test_dataset,
                     optim, lr_scheduler, criterion, model)
 
     trainer.train()

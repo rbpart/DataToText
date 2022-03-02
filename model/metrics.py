@@ -7,12 +7,10 @@ from sklearn.model_selection import train_test_split
 from spacy.tokens import doc
 import en_core_web_lg
 from tqdm import tqdm
-from data.elastic import Fetcher
 import warnings
+from utils import bleu_score_one, damerau_levenshtein_distance
 warnings.filterwarnings("ignore", message=r"\[W008\]", category=UserWarning)
 nlp = en_core_web_lg.load()
-es = Fetcher()
-fields = es.fields
 
 device = torch.device('cuda')
 print('Cuda available :', torch.cuda.is_available())
@@ -20,44 +18,33 @@ DATAPATH = 'datasets/idl/'
 PREPROCESSED_DATAPATH = 'preprocessed/idl/'
 DELIM = "￨" #It's not the regular | symbol
 ENT_SIZE= 6
-def makedir():
-    if not os.path.isdir('preprocessed/'):
-        os.mkdir('preprocessed/')
-    if not os.path.isdir(PREPROCESSED_DATAPATH):
-        os.mkdir(PREPROCESSED_DATAPATH)
 
-def train_test_valid_split(*data, train_size=0.7, valid_size=0.15, test_size=0.15, save=True):
-    train, test_valid, tar_train, tar_train_valid = train_test_split(*data,train_size=train_size,shuffle=True, random_state=42)
-    test, valid, tar_test, tar_valid = train_test_split(test_valid, tar_train_valid, train_size=test_size/(valid_size+test_size), random_state=42)
-    to_return = (train, test, valid, tar_train, tar_test, tar_valid)
-    if save:
-        open(DATAPATH+'src-train.txt','w').write('\n'.join(train))
-        open(DATAPATH+'src-test.txt','w').write('\n'.join(test))
-        open(DATAPATH+'src-valid.txt','w').write('\n'.join(valid))
-        open(DATAPATH+'tar-train.txt','w').write('\n'.join(tar_train))
-        open(DATAPATH+'tar-test.txt','w').write('\n'.join(tar_test))
-        open(DATAPATH+'tar-valid.txt','w').write('\n'.join(tar_valid))
-    return to_return
 
-def preprocess(dataset='idl', to_drop = []):
-    error = 0
-    with open(f'./datasets/{dataset}/comments.json', 'r') as json_file:
-        file = json.load(json_file)
-        raw, source, target = [], [], []
-        for data in tqdm(file):
-            try:
-                data['es_data'] = es.fetch_data(data)
-                data['country'] = es.fetch_country(data)
-                raw.append(data)
-                source.append(build_target(build_macroplan(data)))
-                target.append(re.sub('\n','',data['comment']).lower())
-            except Exception as e:
-                error += 1
-    print(error)
-    return(file,source, target)
+def metrics(inferred_str,golden_str,raw_data_entities):
+    entities_golden = extract_entities(golden_str)
+    entities_inferred = extract_entities(inferred_str),
+    RGPPerc, RGPNum = 0, 0
+    TP,FP, FN, TN = 0,0,0,0
+    ContentOrdering = 0
+    for information in entities_inferred:
+        if information in raw_data_entities:
+            RGPNum += 1
+        if information in entities_golden:
+            TP += 1
+        else:
+            FP += 1
+    for information in entities_golden:
+        if information not in entities_inferred:
+            FN += 1
+    TN = len(raw_data_entities) - FN - TP - FP
+    RGPPerc = RGPNum/len(entities_inferred)
+    CSP_Precision = TP/(TP+FP)
+    CSP_Recall = TP/(TP+FN)
+    ContentOrdering = damerau_levenshtein_distance(' '.join(entities_golden), ' '.join(entities_inferred))
+    return RGPNum, RGPPerc, CSP_Precision, CSP_Recall, ContentOrdering
 
-def build_target(macroplan):
-    tar = ''
+def extract_entities(macroplan):
+    tar = []
     for ent in macroplan:
         tar += build_ent(ent)
     return tar
@@ -68,7 +55,7 @@ def build_ent(ent):
         tar += ' ' + DELIM.join([key,str(value)])
     for i in range(ENT_SIZE-len(ent)):
         tar += ' ' + DELIM.join(['<blank>']*2)
-    return tar + ' '
+    return [tar + ' ']
 
 def build_macroplan(data):
     useless = ['comment','analysis_id','current_analyse_id','entity_impact_id','impact_type','es_data','name']
@@ -202,12 +189,3 @@ def extract_impact_indexed(index,data,tokens,diff=0.01):
                 else:
                     results += [{'TYPE':'impact','IMPACT_VALUE':trigger[0].text,'POSITION':(trigger[0].idx,trigger[0].idx+len(trigger[0])), 'IMPACT_NAME':index[value], 'IMPACT_PCT': [val for val in index if index[value] == index[val] and val != trigger[0].text][0]}]
     return results
-
-if __name__ == '__main__':
-    makedir()
-    raw, data, target = preprocess()
-    items = train_test_valid_split(data,target,save=False)
-    os.system("onmt_build_vocab -config preprocess.yml")
-
-
-# %%

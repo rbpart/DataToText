@@ -1,5 +1,10 @@
 from itertools import tee
 import torch
+from model.parser import HyperParameters
+from tqdm import tqdm
+from torchtext.data.metrics import bleu_score
+from typing import List
+hparams = HyperParameters()
 
 def aeq(*args):
     """
@@ -27,3 +32,56 @@ def nwise(iterable, n=2):
     iterables = tee(iterable, n)
     [next(iterables[i]) for i in range(n) for j in range(i)]
     return zip(*iterables)
+
+
+
+# instead of concatenating tensors, we need to create a full size tensor and run inference at
+# step i on the firsts i-th words : we avoid creating new tensors in each loop
+def run_inference(model,preprocessed_srcs,dataset, hparms = hparams):
+    _,batch_size,_ = preprocessed_srcs.shape
+    targets = [['<bos>']*batch_size]
+    targets = [dataset.tgt_vocab(t) for t in targets]
+    tgt = torch.zeros((dataset.max_comment_len,batch_size),dtype=torch.long, device=hparms.device, requires_grad = False)
+    tgt[0,:] = torch.tensor(targets, device=hparams.device, requires_grad = False)
+    model.eval()
+    with torch.no_grad():
+        for i in tqdm(range(1,dataset.max_comment_len)):
+            out = model(preprocessed_srcs,tgt[:i,:])
+            tgt[i,:] = out.argmax(2).transpose(0,1)[i-1,:]
+    model.train()
+    return tgt
+
+def inferred_to_sentence(tensor, dataset):
+    output = tensor.transpose(0,1).tolist()
+    comments = []
+    for sentence in output:
+        comments.append(' '.join(dataset.tgt_vocab.lookup_tokens(sentence)))
+    return comments
+
+def bleu_score_one(sentence: List[str], tokens: List[str]):
+    return bleu_score([sentence.split(' ')],[tokens])
+
+def damerau_levenshtein_distance(s1, s2):
+    d = {}
+    lenstr1 = len(s1)
+    lenstr2 = len(s2)
+    for i in range(-1,lenstr1+1):
+        d[(i,-1)] = i+1
+    for j in range(-1,lenstr2+1):
+        d[(-1,j)] = j+1
+
+    for i in range(lenstr1):
+        for j in range(lenstr2):
+            if s1[i] == s2[j]:
+                cost = 0
+            else:
+                cost = 1
+            d[(i,j)] = min(
+                           d[(i-1,j)] + 1, # deletion
+                           d[(i,j-1)] + 1, # insertion
+                           d[(i-1,j-1)] + cost, # substitution
+                          )
+            if i and j and s1[i]==s2[j-1] and s1[i-1] == s2[j]:
+                d[(i,j)] = min (d[(i,j)], d[i-2,j-2] + cost) # transposition
+
+    return d[lenstr1-1,lenstr2-1]
