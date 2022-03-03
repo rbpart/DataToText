@@ -15,14 +15,15 @@ if __name__=="__main__":
     test_dataset = IDLDataset(hparameters, 'test')
 
     model = build_model(hparameters,dataset)
-    criterion = nn.NLLLoss(ignore_index=dataset.tgt_vocab([dataset.tgt_pad_word])[0],
+    criterion = nn.CrossEntropyLoss(ignore_index=dataset.tgt_vocab([dataset.tgt_pad_word])[0],
                         reduction="sum")
     optim = torch.optim.Adam(model.parameters(), lr=hparameters.learning_rate)
-    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim,[lambda epoch: 0.95**epoch])
+    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim,[lambda epoch: 0.95**(epoch/4)])
 
-
+    # writer.add_graph(model)
     trainer = Trainer(hparameters, dataset, test_dataset,
-                    optim, lr_scheduler, criterion, model)
+                    optim, lr_scheduler, criterion, model, writer=writer)
 
     trainer.train()
+
 # %%

@@ -1,6 +1,7 @@
 from torch import nn as nn
 import numpy as np
 from tqdm import tqdm
+from torch.utils.tensorboard.writer import SummaryWriter
 from torch.utils.data import DataLoader
 from model.dataset import IDLDataset
 import torch
@@ -13,9 +14,11 @@ from torch.utils.data import random_split
 class Trainer():
     def __init__(self, opts: HyperParameters = None, dataset: IDLDataset = None, test_dataset: IDLDataset = None,
                 optim: torch.optim.Optimizer = None, scheduler: torch.optim.lr_scheduler._LRScheduler = None,
-                criterion: nn.Module = None, model: DataToTextModel = None, checkpoint_file = None) -> None:
+                criterion: nn.Module = None, model: DataToTextModel = None, checkpoint_file = None,
+                writer: SummaryWriter = None) -> None:
 
         self.checkpoint_file = checkpoint_file
+        self.writer = writer
         if checkpoint_file:
             self.load(checkpoint_file)
         elif None not in [model,optim,scheduler]:
@@ -74,9 +77,9 @@ class Trainer():
         running_loss = 0
         for i,batch in enumerate(self.train_iterator.batch_sampler,1):
             running_time = time.time()
-            src, tar, lenghts, tar_tokens = self.train_dataset[batch]
+            src, tar, lenghts, tar_tokens, src_raw = self.train_dataset[batch]
             self.optim.zero_grad()
-            out = self.model(src,tar,lenghts)
+            out = self.model(src,tar,lenghts,src_words=src_raw)
             tar = tar.transpose(1,0)
             loss = 0
             for bn in range(len(batch)):
@@ -97,19 +100,25 @@ class Trainer():
         print(f'| epoch {epoch:3d} | {iter:3d}/{int(self.num_batches)+1:3d} batches | '+
                   f'lr {lr:1.5f} | {time*1000:5.2f} ms/batch  | avg loss {loss:5.2f} | '+
                   f'ETA: {self.avg_time*(self.num_batches-iter):5.2f} min', end='\r')
+        if self.writer is not None:
+            self.writer.add_scalar('AvgBatchLoss/Train',loss,iter+epoch*self.num_batches)
 
     def report_epoch(self,epoch,start_time,train_loss,valid_loss):
             print('-' * 89)
             print(f'| end of epoch {epoch:3d} | elapsed time: {(time.time()-start_time)/60:3.2f} min | '
                 f'avg train loss {train_loss/len(self.train_dataset):5.2f} | avg valid loss {valid_loss/len(self.valid_dataset):5.2f} ')
             print('-' * 89)
+            if self.writer is not None:
+                self.writer.add_scalar('AvgBatchLossPerEpoch/Train',train_loss/len(self.train_dataset),epoch)
+                self.writer.add_scalar('AvgBatchLossPerEpoch/Valid',valid_loss/len(self.valid_dataset),epoch)
+
 
     def evaluate(self, dataset, iterator: DataLoader):
         loss = 0
         for i, batch in tqdm(enumerate(iterator.batch_sampler),total= int(len(dataset)/self.opts.batch_size)+1 ,desc='Evaluation '):
             with torch.no_grad():
-                src, tar, lenghts, tar_tokens = dataset[batch]
-                out = self.model(src,tar)
+                src, tar, lenghts, tar_tokens, src_raw = dataset[batch]
+                out = self.model(src,tar,src_words=src_raw)
                 tar = tar.transpose(1,0)
                 for bn in range(len(batch)):
                     loss += self.criterion(out[bn],tar[bn])

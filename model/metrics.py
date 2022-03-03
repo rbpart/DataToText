@@ -1,40 +1,50 @@
 #%%
-import os
-import json
+from model.dataset import Entity
 import torch
 import re
-from sklearn.model_selection import train_test_split
 from spacy.tokens import doc
 import en_core_web_lg
-from tqdm import tqdm
 import warnings
-from utils import bleu_score_one, damerau_levenshtein_distance
-warnings.filterwarnings("ignore", message=r"\[W008\]", category=UserWarning)
+from utils import damerau_levenshtein_distance
+# warnings.filterwarnings("ignore", message=r"\[W008\]", category=UserWarning)
 nlp = en_core_web_lg.load()
 
-device = torch.device('cuda')
-print('Cuda available :', torch.cuda.is_available())
 DATAPATH = 'datasets/idl/'
 PREPROCESSED_DATAPATH = 'preprocessed/idl/'
 DELIM = "￨" #It's not the regular | symbol
 ENT_SIZE= 6
 
+def to_dict(ent):
+    dic = {}
+    for data,tag in zip(ent.data,ent.tag):
+        dic[tag] = data
+    return dic
+
+def entities_probably_equal(ent1,ent2):
+    return len(set(ent1.data)-set(ent2.data)) > 0
+
+def entity_probably_in(ent1,list_ents):
+    for ent in list_ents:
+        if entities_probably_equal(ent,ent1):
+            return True
+    return False
+
 
 def metrics(inferred_str,golden_str,raw_data_entities):
-    entities_golden = extract_entities(golden_str)
-    entities_inferred = extract_entities(inferred_str),
+    entities_golden = extract_entities(golden_str,raw_data_entities)
+    entities_inferred = extract_entities(inferred_str,raw_data_entities)
     RGPPerc, RGPNum = 0, 0
     TP,FP, FN, TN = 0,0,0,0
     ContentOrdering = 0
-    for information in entities_inferred:
-        if information in raw_data_entities:
+    for entity in entities_inferred:
+        if entity_probably_in(entity,raw_data_entities):
             RGPNum += 1
-        if information in entities_golden:
+        if entity_probably_in(entity,entities_golden):
             TP += 1
         else:
             FP += 1
-    for information in entities_golden:
-        if information not in entities_inferred:
+    for entity in entities_golden:
+        if not entity_probably_in(entity,entities_inferred):
             FN += 1
     TN = len(raw_data_entities) - FN - TP - FP
     RGPPerc = RGPNum/len(entities_inferred)
@@ -43,7 +53,8 @@ def metrics(inferred_str,golden_str,raw_data_entities):
     ContentOrdering = damerau_levenshtein_distance(' '.join(entities_golden), ' '.join(entities_inferred))
     return RGPNum, RGPPerc, CSP_Precision, CSP_Recall, ContentOrdering
 
-def extract_entities(macroplan):
+def extract_entities(comment):
+    macroplan = build_macroplan(comment)
     tar = []
     for ent in macroplan:
         tar += build_ent(ent)
@@ -58,10 +69,7 @@ def build_ent(ent):
     return [tar + ' ']
 
 def build_macroplan(data):
-    useless = ['comment','analysis_id','current_analyse_id','entity_impact_id','impact_type','es_data','name']
-    infos = [x for x in data.keys() if x not in useless and data[x] is not None]
     tokens = nlp(re.sub('\n','',data['comment']).lower())
-    indexed_data = data['es_data']
     matchs = (infos_recognition(data,tokens,infos),
     country_recognition(data,tokens),
     impact_recognition(data,tokens,indexed_data['impacts']),

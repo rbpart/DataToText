@@ -10,6 +10,7 @@ from torch.utils.data.sampler import Sampler
 
 Entity =  namedtuple('Entity',('data','tags'))
 
+Batch = namedtuple('Batch', ('src_vectors','src_words','tgt_vectors','tgt_words','tgt_lengths'))
 class IDLDataset(Dataset):
 
     def __init__(self,opts:HyperParameters, type='train', transform = None) -> None:
@@ -32,13 +33,13 @@ class IDLDataset(Dataset):
             idx = idx.tolist()
         if type(idx) is int:
             idx = [idx]
-        src = [self.src_samples[i] for i in idx]
+        src_raw = [self.src_samples[i] for i in idx]
         tar_tokens = [self.tgt_samples[i] for i in idx]
-        src, tars = self._src_vector(src),self._tgt_vector(tar_tokens)
+        src, tars = self._src_vector(src_raw),self._tgt_vector(tar_tokens)
         tar, tar_lengths, tokens = tars
         if self.transform:
             src = self.transform(src)
-        return src.transpose(0,2), tar.transpose(0,1), tar_lengths, tokens
+        return src.transpose(0,2), tar.transpose(0,1), tar_lengths, tokens, src_raw
 
     def _pad_entity(self,ent_word: list,ent_tag: list, size):
         blank_line_word = self.src_vocab([self.src_pad_word])*(size - len(ent_word))
@@ -69,13 +70,15 @@ class IDLDataset(Dataset):
     def _tgt_vector(self,sample:List[str]):
         if not isinstance(sample[0],list):
             sample = [sample]
-        paddeds, lenghts = [], []
+        paddeds, lenghts, tokens = [], [], []
         for comment in sample:
             padded_tokens, length_padding = self._pad_comment(comment)
             padded = self.tgt_vocab(padded_tokens)
             paddeds.append(padded)
             lenghts.append(length_padding)
-        return  torch.tensor(paddeds, dtype=torch.long, device=self.device), lenghts, padded_tokens
+            tokens.append(padded_tokens)
+        lenghts = torch.tensor([[s] for s in lenghts], dtype=torch.long, device=self.device)
+        return  torch.tensor(paddeds, dtype=torch.long, device=self.device), lenghts, tokens
 
     def _load_entity(self, entity:str, info_token = ' ', split_token = '|') -> Tuple:
         data, tags = [], []

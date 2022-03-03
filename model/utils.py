@@ -1,9 +1,10 @@
 from itertools import tee
 import torch
+import json
 from model.parser import HyperParameters
 from tqdm import tqdm
 from torchtext.data.metrics import bleu_score
-from typing import List
+from typing import List, Union
 hparams = HyperParameters()
 
 def aeq(*args):
@@ -58,8 +59,14 @@ def inferred_to_sentence(tensor, dataset):
         comments.append(' '.join(dataset.tgt_vocab.lookup_tokens(sentence)))
     return comments
 
-def bleu_score_one(sentence: List[str], tokens: List[str]):
-    return bleu_score([sentence.split(' ')],[tokens])
+def bleu_score_(comment_str: List[str], tokens: List[List[str]]):
+    tok_candidates = [sent.split(' ') for sent in comment_str]
+    tok_copy = json.loads(json.dumps(tokens))
+    for i, cand in enumerate(tok_candidates):
+        tok_copy[i] += ['<blank>']*(len(cand)-len(tok_copy[i]))
+        tok_copy[i] = [tok_copy[i]]
+    return bleu_score(tok_candidates,tok_copy,max_n=1,weights=[1])
+
 
 def damerau_levenshtein_distance(s1, s2):
     d = {}

@@ -1,5 +1,6 @@
 #%%
 from model.model import DataToTextModel
+from modules.copy_generator import CopyGenerator
 from modules.table_embeddings import TableEmbeddings
 from decoders.hierarchical_decoder import HierarchicalRNNDecoder
 from encoders.hierarchical_transformer import HierarchicalTransformerEncoder
@@ -76,21 +77,30 @@ def build_encoder(opts,loader:IDLDataset) -> nn.Module :
 def build_decoder(opts,loader:IDLDataset) -> nn.Module :
     decoder_embeddings = build_embeddings(opts,loader,for_encoder=False)
     decoder = HierarchicalRNNDecoder(
-        hidden_size=opts.rnn_size, num_layers=1, bidirectional_encoder=True,
-        rnn_type="LSTM", embeddings=decoder_embeddings)
+        hidden_size=opts.rnn_size, num_layers=2,
+        bidirectional_encoder=True,
+        rnn_type="LSTM", embeddings=decoder_embeddings,
+        dropout=opts.dropout[0] if type(opts.dropout) is list else opts.dropout)
     return decoder
 
 def build_generator(opts, loader:IDLDataset) -> nn.Module:
-    return nn.Sequential(
-        nn.Linear(opts.rnn_size, len(loader.tgt_vocab)),
-        nn.LogSoftmax(dim=-1))
+    word_padding_idx = loader.tgt_vocab([loader.tgt_pad_word])[0]
+
+    return CopyGenerator(
+        opts.rnn_size,
+        len(loader.tgt_vocab),
+        pad_idx=word_padding_idx)
+    # return nn.Sequential(
+    #     nn.Linear(opts.rnn_size, len(loader.tgt_vocab)),
+    #     nn.T
+    #     nn.LogSoftmax(dim=-1))
 
 def build_model(opts: HyperParameters, loader: IDLDataset):
 
     decoder = build_decoder(opts,loader)
     encoder = build_encoder(opts,loader)
     generator = build_generator(opts,loader)
-    model = DataToTextModel(encoder,decoder,generator,device = opts.device)
+    model = DataToTextModel(encoder,decoder,generator,device = opts.device,dataset_model = loader)
     return model
 
 
