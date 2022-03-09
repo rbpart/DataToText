@@ -20,13 +20,14 @@ class HyperParameters(ArgumentParser):
     rnn_size = 600
     feat_merge = 'concat'
     dropout = [0.5]
-    batch_size = 4
+    batch_size = 8
     num_epochs=50
-    learning_rate = 0.01
+    learning_rate = 0.001
     device = "cuda" if torch.cuda.is_available() else "cpu"
     save_path = "model/models/"
     pretrained_tgt_embeddings_path = 'pretrained_embeddings/glove/glove.6B.300d.txt'
     train_size = 0.8
+    reduction = "mean"
 
     def __init__(self) -> None:
         super().__init__(self)

@@ -48,13 +48,13 @@ class CopyGenerator(nn.Module):
        output_size (int): size of output vocabulary
        pad_idx (int)
     """
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     def __init__(self, input_size, output_size, pad_idx):
         super(CopyGenerator, self).__init__()
         self.linear = nn.Linear(input_size, output_size)
         self.linear_copy = nn.Linear(input_size, 1)
         self.pad_idx = pad_idx
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     def forward(self, hidden, attn, src_map):
         """
@@ -73,9 +73,6 @@ class CopyGenerator(nn.Module):
 
         # CHECKS
         tar_len_,batch_sizeH_, src_len_ = attn.size()
-        if src_map is None:
-            eye = torch.eye(src_len_,1)
-            src_map = torch.stack([eye]*batch_sizeH_)
         tar_len,batch_sizeH, _ = hidden.size()
         src_len, batch, cvocab = src_map.size()
         aeq(tar_len*batch_sizeH, tar_len_*batch_sizeH_)
@@ -83,19 +80,20 @@ class CopyGenerator(nn.Module):
 
         # Original probabilities.
         logits = self.linear(hidden)
-        logits[:, self.pad_idx] = -float('inf')
-        prob = torch.softmax(logits, 1)
-
-        # Probability of copying p(z=1) batch.
-        p_copy = torch.sigmoid(self.linear_copy(hidden))
-        # Probability of not copying: p_{word}(w) * (1 - p(z))
-        out_prob = torch.mul(prob, 1 - p_copy)
-        mul_attn = torch.mul(attn, p_copy)
-        copy_prob = torch.bmm(
-            mul_attn.view(-1, batch, src_len).transpose(0, 1),
-            src_map.transpose(0, 1)
-        ).transpose(0, 1)
-        copy_prob = copy_prob.contiguous().view(-1, cvocab)
-        copy_prob = torch.stack(copy_prob.split(out_prob.size()[0],dim=0)).transpose(0,1)
-        copy_prob[:,:,:out_prob.shape[2]] += out_prob
+        logits[:,:, self.pad_idx] = -1e20
+        with torch.autocast(device_type=self.device):
+            prob = torch.softmax(logits, 1)
+            # Probability of copying p(z=1) batch.
+            p_copy = torch.sigmoid(self.linear_copy(hidden))
+            # Probability of not copying: p_{word}(w) * (1 - p(z))
+            out_prob = torch.mul(prob, 1 - p_copy)
+            mul_attn = torch.mul(attn, p_copy)
+        # probably a more memory-time efficient way to do this
+            copy_prob = torch.bmm(
+                mul_attn.view(-1, batch, src_len).transpose(0, 1),
+                src_map.to_dense().transpose(0, 1)
+            ).transpose(0, 1)
+            copy_prob = copy_prob.contiguous().view(-1, cvocab)
+            copy_prob = copy_prob.view((tar_len,batch_sizeH,cvocab))
+            copy_prob[:,:,:out_prob.shape[2]] += out_prob
         return copy_prob

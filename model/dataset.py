@@ -7,6 +7,11 @@ import torch
 from tqdm import tqdm
 from model.parser import HyperParameters
 from torch.utils.data.sampler import Sampler
+from torch.nn.functional import one_hot
+from torchtext.vocab.vocab_factory import build_vocab_from_iterator
+from torchtext.vocab.vocab import Vocab
+from itertools import chain
+import copy
 
 Entity =  namedtuple('Entity',('data','tags'))
 
@@ -35,37 +40,43 @@ class IDLDataset(Dataset):
             idx = [idx]
         src_raw = [self.src_samples[i] for i in idx]
         tar_tokens = [self.tgt_samples[i] for i in idx]
-        src, tars = self._src_vector(src_raw),self._tgt_vector(tar_tokens)
+        srcs, tars = self._src_vector(src_raw),self._tgt_vector(tar_tokens)
         tar, tar_lengths, tokens = tars
+        src, src_len = srcs
+        src_map, fusedvocab = self._gen_src_map(src_raw)
         if self.transform:
             src = self.transform(src)
-        return src.transpose(0,2), tar.transpose(0,1), tar_lengths, tokens, src_raw
+        src = src.transpose(0,2)
+        tar = tar.transpose(0,1)
+        return src, src_len, src_map, tar, tar_lengths, tokens, fusedvocab
 
     def _pad_entity(self,ent_word: list,ent_tag: list, size):
         blank_line_word = self.src_vocab([self.src_pad_word])*(size - len(ent_word))
         blank_line_feat = self.src_vocab_feat([self.src_pad_feat])*(size - len(ent_tag))
-        return ent_word + blank_line_word, ent_tag + blank_line_feat
+        return ent_word + blank_line_word, ent_tag + blank_line_feat, len(ent_word)
 
     def _pad_comment(self,list_comment: list):
         padding_size = (self.max_comment_len-len(list_comment))
         return list_comment + [self.tgt_pad_word]*padding_size, len(list_comment)
 
     def _src_vector(self,sample: List[List[Entity]]):
-        words, tags = [], []
+        words, tags, lenghts = [], [], []
         if not isinstance(sample[0],list):
             sample = [sample]
         for record in sample:
             word, tag = [], []
             for entity in record:
-                word_e, tag_e = self._pad_entity(self.src_vocab(entity.data),
+                word_e, tag_e,_ = self._pad_entity(self.src_vocab(entity.data),
                     self.src_vocab_feat(entity.tags), self.opts.ENT_SIZE)
                 word += word_e
                 tag += tag_e
-            word, tag = self._pad_entity(word,tag,self.max_entities*self.opts.ENT_SIZE)
+            word, tag, leng = self._pad_entity(word,tag,self.max_entities*self.opts.ENT_SIZE)
+            lenghts.append(leng)
             words.append(word)
             tags.append(tag)
-        src = torch.tensor([words,tags], dtype=torch.long, device=self.device) # [indexOfSample,indexOfEntity,indexOfFeature] = #indexWordInWordVocab => nb de mots
-        return src
+        src = torch.tensor([words,tags], dtype=torch.long, device=self.device)
+        lenghts = torch.tensor(lenghts,device = self.device, dtype=torch.long)
+        return src, lenghts
 
     def _tgt_vector(self,sample:List[str]):
         if not isinstance(sample[0],list):
@@ -109,6 +120,23 @@ class IDLDataset(Dataset):
         self.tgt_vocab : Vocab = torch.load(self.opts.tgt_vocab)
         self.len_tgt_vocab = len(self.tgt_vocab)
 
+    def _gen_src_map(self,src_words):
+        data = [list(chain.from_iterable([ent.data for ent in sample])) for sample in src_words]
+        data_vocab = build_vocab_from_iterator(data)
+        fused_vocab = self.fuse_vocabs(self.tgt_vocab,data_vocab)
+        max_len = self.max_entities*self.opts.ENT_SIZE
+        data = [fused_vocab(sample) + fused_vocab(['<blank>'])*(max_len-len(sample)) for sample in data]
+        src_map = torch.tensor(data, dtype=torch.long, device=self.device)
+        src_map = one_hot(src_map).transpose(0,1).to(torch.float).to_sparse()
+        return src_map, fused_vocab
+
+    def fuse_vocabs(self,vocab_base: Vocab,vocab_extension: Vocab):
+        newvocab = copy.copy(vocab_base)
+        itos = vocab_base.get_itos()
+        itos_ex = vocab_extension.get_itos()
+        for w in (set(itos_ex) - set(itos)):
+            newvocab.append_token(w)
+        return newvocab
 class BatchSamplerSimilarLength(Sampler):
     def __init__(self, dataset, batch_size, indices=None, shuffle=True):
         self.batch_size = batch_size

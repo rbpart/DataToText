@@ -12,8 +12,6 @@ class TableEmbeddings(torch.nn.Module):
     such, TableEmbeddings' forward returns embeddings for pos and value.
     Furthermore, the value embedding can be merged with the pos embedding.
 
-    Most argument names are not very fitting but stay the same
-    as onmt.modules.Embeddings
     """
 
     def __init__(self,
@@ -44,9 +42,9 @@ class TableEmbeddings(torch.nn.Module):
         else:
             self.feat_vec_size = feat_vec_size
 
-        self.value_embeddings = torch.nn.Embedding(word_vocab_size+1,
+        self.value_embeddings = torch.nn.Embedding(word_vocab_size,
                                    word_vec_size, padding_idx=word_padding_idx)
-        self.pos_embeddings = torch.nn.Embedding(feat_vocab_size+1,
+        self.pos_embeddings = torch.nn.Embedding(feat_vocab_size,
                                    feat_vec_size, padding_idx=feat_padding_idx)
 
         self._merge = merge
@@ -83,10 +81,8 @@ class TableEmbeddings(torch.nn.Module):
 
     def load_pretrained_vectors(self, emb_file):
         """
-        place holder for onmt compatibility
         """
-        if emb_file:
-            raise NotImplementedError
+        raise NotImplementedError
 
     def forward(self, inputs):
         # unpack the inputs as cell values and pos (column name)
