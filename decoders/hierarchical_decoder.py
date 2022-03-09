@@ -98,6 +98,7 @@ class HierarchicalRNNDecoder(RNNDecoderBase):
                 coverage=coverage_attn, use_pos=use_pos,
                 attn_type=attn_type, attn_func=attn_func)
 
+        # Setup and reuse the same layer for copy attn or not
         if copy_attn and not reuse_copy_attn:
             if copy_attn_type == "none" or copy_attn_type is None:
                 raise ValueError(
@@ -154,37 +155,6 @@ class HierarchicalRNNDecoder(RNNDecoderBase):
 #             hidden = tuple(f(h) for h in encoder_final)
 #         else:
 #             hidden = f(encoder_final)
-
-
-
-    @classmethod
-    def from_opt(cls, opt, embeddings, dims=None):
-        """Alternate constructor."""
-        """
-        dims are the dimention of the table embeddings
-        It is a tuple of size two (dim_value, dim_pos)
-        """
-        if dims is None:
-            dims = opt.dec_rnn_size
-
-        return cls(
-            rnn_type=opt.rnn_type,
-            bidirectional_encoder=opt.brnn,
-            num_layers=opt.dec_layers,
-            hidden_size=dims,
-            attn_type=opt.global_attention,
-            attn_func=opt.global_attention_function,
-            coverage_attn=opt.coverage_attn,
-            context_gate=opt.context_gate,
-            copy_attn=opt.copy_attn,
-            dropout=opt.dropout[0] if type(opt.dropout) is list
-            else opt.dropout,
-            embeddings=embeddings,
-            reuse_copy_attn=opt.reuse_copy_attn,
-            copy_attn_type=opt.copy_attn_type,
-            use_pos=opt.use_pos)
-
-
 
     def _run_forward_pass(self, tgt, memory_bank, memory_lengths=None):
         """
@@ -254,7 +224,6 @@ class HierarchicalRNNDecoder(RNNDecoderBase):
                     key = 'copy' + postfix
                     attns.setdefault(key, list())
                     attns[key].append(tensor)
-
 
         # this trick should save memory because torch.stack creates a new
         # object.

@@ -1,8 +1,5 @@
 from encoders.self_attention import MultiHeadSelfAttention
-from torch.nn import MultiheadAttention
-
-import torch, copy
-from itertools import tee
+import torch
 from model.parser import HyperParameters
 import torch.nn as nn
 from model.utils import aeq,sequence_mask
@@ -70,7 +67,6 @@ class TransformerEncoderLayer(torch.nn.Module):
         self.feedforward.update_dropout(dropout)
         self.dropout.p = dropout
 
-
 class TransformerEncoder(torch.nn.Module):
     """TransformerEncoder is a stack of N transformer encoder layers
     It is heavily inspired by pytorch's.
@@ -109,6 +105,7 @@ class TransformerEncoder(torch.nn.Module):
         for layer in self.layers: layer.update_dropout(dropout)
 
 
+
 def block_eye(n, size):
     """
     Create a block_diagonal matrix of n blocks, where each block
@@ -134,13 +131,16 @@ def build_pad_mask(source, ent_size, pad_idx):
     return mask
 
 
-def build_chunk_mask(lengths, ent_size):
+def build_chunk_mask(lengths, ent_size, max_len= None):
+    # TODO : Fix this (feed with right lenghts)
     """
+    lengths : tensor (batch_size) containing the length of each "line" in the table, entity_size*num_entities.
+    Because of the padding, always at ent_s*max_num_ent which never masks the padding !
     [bsz, n_ents, n_ents]
     Filled with -inf where self-attention shouldn't attend, a zeros elsewhere.
     """
     ones = torch.div(lengths, ent_size, rounding_mode='floor')
-    ones = sequence_mask(ones).unsqueeze(1).repeat(1, ones.max(), 1).to(lengths.device)
+    ones = sequence_mask(ones, max_len=max_len).unsqueeze(1).repeat(1, max_len, 1).to(lengths.device)
     mask = torch.full(ones.shape, float('-inf')).to(lengths.device)
     mask.masked_fill_(ones, 0)
     return mask
@@ -169,37 +169,7 @@ class HierarchicalTransformerEncoder(nn.Module):
                                                 dim_feedforward=dim_feedforward,
                                                 glu_depth=chunks_glu_depth,
                                                 dropout=dropout)
-    @classmethod
-    def from_opt(cls, opt, embeddings):
-        """Alternate constructor."""
-        dropout = opt.dropout[0] if type(opt.dropout) is list else opt.dropout
 
-        if isinstance(opt.enc_layers, int) and opt.enc_layers > 0:
-            print('opt.enc_layers is specified, over-riding units_layers and chunks_layers')
-            opt.units_layers = opt.enc_layers
-            opt.chunks_layers = opt.enc_layers
-
-        if isinstance(opt.heads, int) and opt.enc_layers > 0:
-            print('opt.heads is specified, over-riding units_heads and chunks_heads')
-            opt.units_heads = opt.heads
-            opt.chunks_heads = opt.heads
-
-        if isinstance(opt.glu_depth, int) and opt.glu_depth > 0:
-            print('opt.glu_depth is specified, over-riding units_glu_depth and chunks_glu_depth')
-            opt.units_glu_depth = opt.glu_depth
-            opt.chunks_glu_depth = opt.glu_depth
-
-        return cls(
-            embeddings=embeddings,
-            units_layers=opt.units_layers,
-            chunks_layers=opt.chunks_layers,
-            units_heads=opt.units_heads,
-            chunks_heads=opt.chunks_heads,
-            dim_feedforward=opt.transformer_ff,
-            units_glu_depth=opt.units_glu_depth,
-            chunks_glu_depth=opt.chunks_glu_depth,
-            dropout=dropout
-        )
 
     def _check_args(self, src, lengths=None, hidden=None):
         n_batch = src.size(1)
@@ -223,14 +193,14 @@ class HierarchicalTransformerEncoder(nn.Module):
 
          # sanity check
         assert seq_len % n_ents == 0
-        assert seq_len == lengths.max()
+        # assert seq_len == lengths.max()
 
         # We build the masks for self attention and decoding
         eye = block_eye(n_ents, self.ent_size).to(src.device)
         self_attn_mask = torch.full((seq_len, seq_len), float('-inf')).to(src.device)
         self_attn_mask.masked_fill_(eye.to(src.device), 0)
         unit_mask = build_pad_mask(src, self.ent_size, self.embeddings.word_padding_idx).to(src.device)
-        chunk_mask = build_chunk_mask(lengths, self.ent_size).to(src.device)
+        chunk_mask = build_chunk_mask(lengths, self.ent_size, n_ents).to(src.device)
 
         # embs [seq_len, bs, hidden_size]
         embs, pos_embs = self.embeddings(src)
@@ -256,8 +226,10 @@ class HierarchicalTransformerEncoder(nn.Module):
 
         # We average the units representation to give a final encoding
         # and be inline with the onmt framework
+        # [1, bs, hidden_size] encodage "moyen" d'une entité,
+        # l'unsqueeze permet d'avoir la dimension 0 a une size 1
         encoder_final = chunks.mean(dim=0).unsqueeze(0)
-#        encoder_final = (encoder_final, encoder_final)
+        # encoder_final = (encoder_final, encoder_final)
 
         return encoder_final, memory_bank, lengths
 

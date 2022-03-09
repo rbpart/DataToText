@@ -11,7 +11,7 @@ from model.parser import HyperParameters
 from torchtext.vocab import Vectors
 
 
-def load_pretrained(path, dataset:IDLDataset, new_embedding: nn.Embedding):
+def load_pretrained(path, dataset:IDLDataset, new_embedding: nn.Embedding): # only for target
     pretrained = Vectors(path)
     assert pretrained.dim == new_embedding.embedding_dim
     tgt_words = dataset.tgt_vocab.get_itos()
@@ -77,7 +77,7 @@ def build_encoder(opts,loader:IDLDataset) -> nn.Module :
 def build_decoder(opts,loader:IDLDataset) -> nn.Module :
     decoder_embeddings = build_embeddings(opts,loader,for_encoder=False)
     decoder = HierarchicalRNNDecoder(
-        hidden_size=opts.rnn_size, num_layers=2,
+        hidden_size=opts.rnn_size, num_layers=1,
         bidirectional_encoder=True,
         rnn_type="LSTM", embeddings=decoder_embeddings,
         dropout=opts.dropout[0] if type(opts.dropout) is list else opts.dropout)
