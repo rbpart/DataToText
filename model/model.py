@@ -5,7 +5,7 @@ from encoders.hierarchical_transformer import HierarchicalTransformerEncoder
 from tqdm import tqdm
 from model.utils import bleu_score_
 from model.dataset import IDLDataset
-
+import model.output_to_text as ott
 class DataToTextModel(nn.Module):
     def __init__(self, encoder: HierarchicalTransformerEncoder, decoder: HierarchicalRNNDecoder, generator: nn.Sequential,
         dataset_model: IDLDataset = None, device = None) -> None:
@@ -28,7 +28,7 @@ class DataToTextModel(nn.Module):
         for k in tensors.keys():
             self._parameters[k] = tensors[k]
 
-    def forward(self, src, tgt, lengths = None, src_map = None, bptt=False, with_align=False):
+    def forward(self, src, tgt, lengths = None, src_map = None, with_align=False, hidden_state=None) -> torch.Tensor:
         """Forward propagate a `src` and `tgt` pair for training.
         Possible initialized with a beginning decoder state.
 
@@ -53,54 +53,47 @@ class DataToTextModel(nn.Module):
         """
         enc_state, memory_bank, lengths = self.encoder(src, lengths = lengths)
 
-        if bptt is False:
+        if hidden_state is not None:
+            self.decoder.state['hidden'] = hidden_state
+        else:
             self.decoder.init_state(src, memory_bank, enc_state)
+
         dec_out, attns = self.decoder(tgt, memory_bank,
                                     memory_lengths=lengths,
                                     with_align=with_align)
         if "std" in attns: # et la copy attention elle sert a quoi ?
             attn = attns["std"]
             attn_key = 'std'
-
         return  self.generator(dec_out,attn,src_map).transpose(0,1)
 
 
     #Utilitaries for the model
 
-    def _select_dataset(self,dataset):
-        if dataset is not None:
-            dataset = dataset
-        elif self.dataset is not None:
-            dataset = self.dataset
-        else:
-            raise RuntimeError('Provide the dataset with the vocab used for training or initialize model with the dataset')
-        return dataset
+    def infer(self,
+                src: torch.Tensor,
+                src_len: torch.Tensor,
+                src_map: torch.Tensor,
+                bos_idx, inference_type: str = 'beam_search', **kwargs):
+        if inference_type not in ['beam_search','greedy_search']:
+            raise ValueError(f'{inference_type} not supported')
+        search = getattr(ott,inference_type)
+        return search(self,src,src_len,src_map,bos_idx,**kwargs)
 
-    def infer(self, src, src_len, src_map,vocab,dataset = None):
-        dataset = self._select_dataset(dataset)
-        _,batch_size,_ = src.shape
-        beggining = [vocab(t) for t in [['<bos>']*batch_size]]
-        tgt = torch.zeros((dataset.max_comment_len,batch_size), dtype=torch.long, device=self.device, requires_grad = False)
-        tgt[0,:] = torch.tensor(beggining, device=self.device, requires_grad = False)
-        self.eval()
-        with torch.no_grad():
-            for i in tqdm(range(1,100)):
-                out = self.forward(src,
-                            torch.where(tgt[:i,:] < len(dataset.tgt_vocab),tgt[:i,:],0),
-                            src_len,
-                            src_map=src_map)
-                tgt[i,:] = out.argmax(2).transpose(0,1)[i-1,:] #maybe problem with this line cause repetition
-        self.train()
-        return tgt
-
-    def infer_to_sentence(self, src, src_len, src_map, vocab, dataset=None):
-        dataset = self._select_dataset(dataset)
-        tgts = self.infer(src, src_len, src_map, vocab, dataset)
-        tgts = tgts.transpose(0,1).tolist()
+    def infer_to_sentence(self,
+                vocab,
+                src: torch.Tensor,
+                src_len: torch.Tensor,
+                src_map: torch.Tensor,
+                bos_idx, inference_type: str = 'beam_search', **kwargs):
+        tgts = self.infer(src, src_len, src_map, bos_idx, inference_type, **kwargs)
+        tgts = tgts.cpu().tolist()
         comments = []
         for sentence in tgts:
             comments.append(' '.join(vocab.lookup_tokens(sentence)))
-        return comments
+        return self.outprocess(comments)
+
+    def outprocess(self,sentences):
+        return [sent.split('<eos>')[0] for sent in sentences]
 
     def update_dropout(self, dropout):
         self.encoder.update_dropout(dropout)

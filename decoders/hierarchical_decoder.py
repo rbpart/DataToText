@@ -18,8 +18,6 @@ def _check_for_nan(tensor):
 class HierarchicalRNNDecoder(RNNDecoderBase):
     """Input feeding based decoder.
 
-    See :class:`~onmt.decoders.decoder.RNNDecoderBase` for options.
-
     Based around the input feeding approach from
     "Effective Approaches to Attention-based Neural Machine Translation"
     :cite:`Luong2015`

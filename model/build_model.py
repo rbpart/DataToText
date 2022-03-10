@@ -77,7 +77,7 @@ def build_encoder(opts,loader:IDLDataset) -> nn.Module :
 def build_decoder(opts,loader:IDLDataset) -> nn.Module :
     decoder_embeddings = build_embeddings(opts,loader,for_encoder=False)
     decoder = HierarchicalRNNDecoder(
-        hidden_size=opts.rnn_size, num_layers=1,
+        hidden_size=opts.rnn_size, num_layers=2,
         bidirectional_encoder=True,
         rnn_type="LSTM", embeddings=decoder_embeddings,
         dropout=opts.dropout[0] if type(opts.dropout) is list else opts.dropout)
