@@ -30,5 +30,3 @@ if __name__=="__main__":
                     optim, lr_scheduler, criterion, model, writer=writer)
 
     trainer.train(save_every=750, accumulate=4, clip=1.0)
-
-# %%

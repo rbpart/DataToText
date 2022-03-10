@@ -1,6 +1,7 @@
 #%%
 import os
 import json
+from typing import List
 import torch
 import re
 from collections import namedtuple
@@ -147,15 +148,18 @@ def _load_entities(line:str,entity_token = '<ent>|<ent>'):
 
 def vocab_src(data):
     samples = [_load_entities(line.strip()) for line in tqdm(data) if line != '']
-    src_vocab : Vocab = build_vocab_from_iterator([entity.data for sample in samples for entity in sample ])
+    src_vocab : Vocab = build_vocab_from_iterator([_process_src(entity.data) for sample in samples for entity in sample ])
     src_vocab_feat : Vocab = build_vocab_from_iterator([entity.tags for sample in samples for entity in sample ])
     return src_vocab, src_vocab_feat
 
-def _process(line:str):
-    return ['<bos>'] + line.split(' ') + ['<eos>']
+def _process_src(entitydata: List[str]):
+    return [re.sub('_',' ',data.lower()) for data in entitydata]
+
+def _process_tgt(line:str):
+    return ['<bos>'] + line.lower().split(' ') + ['<eos>']
 
 def vocab_tgt(data):
-    samples = [_process(line) for line in tqdm(data) if line != '']
+    samples = [_process_tgt(line) for line in tqdm(data) if line != '']
     tgt_vocab : Vocab = build_vocab_from_iterator(samples,specials=['<unk>','<blank>','<bos>','<eos>'])
     tgt_vocab.set_default_index(tgt_vocab['<unk>'])
     return tgt_vocab

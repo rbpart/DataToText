@@ -4,6 +4,7 @@ import numpy as np
 from torch.utils.data import Dataset
 from torchtext.vocab import Vocab
 import torch
+import re
 from tqdm import tqdm
 from model.parser import HyperParameters
 from torch.utils.data.sampler import Sampler
@@ -111,12 +112,15 @@ class IDLDataset(Dataset):
         lenghts = torch.tensor([[s] for s in lenghts], dtype=torch.long, device=self.device)
         return  torch.tensor(paddeds, dtype=torch.long, device=self.device), lenghts, tokens
 
+    def _preprocess_src(self,data):
+        return [re.sub('_',' ',string).lower() for string in data]
+
     def _load_entity(self, entity:str, info_token = ' ', split_token = '|') -> Tuple:
         data, tags = [], []
         for info in entity.split(info_token):
             data.append(info.split(split_token)[0])
             tags.append(info.split(split_token)[1])
-        return data, tags
+        return self._preprocess_src(data), tags
 
     def _load_entities(self,line:str,entity_token = '<ent>|<ent>') -> List[Entity]:
         return [Entity(*self._load_entity(entity.strip())) for entity in line.split(entity_token) if entity != '']

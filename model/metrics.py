@@ -1,22 +1,20 @@
 #%%
-from model.dataset import Entity
-import torch
 import re
 from spacy.tokens import doc
 import en_core_web_lg
+from model.utils import damerau_levenshtein_distance
 import warnings
-from utils import damerau_levenshtein_distance
-# warnings.filterwarnings("ignore", message=r"\[W008\]", category=UserWarning)
+from typing import List
+warnings.filterwarnings("ignore", message=r"\[W008\]", category=UserWarning)
 nlp = en_core_web_lg.load()
-
 DATAPATH = 'datasets/idl/'
 PREPROCESSED_DATAPATH = 'preprocessed/idl/'
-DELIM = "￨" #It's not the regular | symbol
+DELIM = "|" #It's not the regular | symbol
 ENT_SIZE= 6
-
+#%%
 def to_dict(ent):
     dic = {}
-    for data,tag in zip(ent.data,ent.tag):
+    for data,tag in zip(ent.data,ent.tags):
         dic[tag] = data
     return dic
 
@@ -29,81 +27,75 @@ def entity_probably_in(ent1,list_ents):
             return True
     return False
 
+def reprocess(src):
+    processed = []
+    for ent in src:
+        processed.append(to_dict(ent))
+    return processed
 
-def metrics(inferred_str,golden_str,raw_data_entities):
-    entities_golden = extract_entities(golden_str,raw_data_entities)
-    entities_inferred = extract_entities(inferred_str,raw_data_entities)
+def metrics(batch_inferred, batch_golden, batch_src):
+    for inferred, golden, src in zip(batch_inferred,batch_golden,batch_src):
+        metric = _metrics(inferred,golden,src)
+    return metric
+
+def _metrics(inferred_str,golden_tokens,src):
+    # TODO: suppress when all nice and tidy
+    src = reprocess(src)
+    golden_str = ' '.join(golden_tokens).replace(' <blank>','')
+    entities_golden = extract_entities(golden_str,src)
+    entities_inferred = extract_entities(inferred_str,src)
+
     RGPPerc, RGPNum = 0, 0
     TP,FP, FN, TN = 0,0,0,0
     ContentOrdering = 0
-    for entity in entities_inferred:
-        if entity_probably_in(entity,raw_data_entities):
+    for entity,key,value,position in entities_inferred:
+        if entity_probably_in(entity,src):
             RGPNum += 1
         if entity_probably_in(entity,entities_golden):
             TP += 1
         else:
             FP += 1
-    for entity in entities_golden:
+    for entity,key,value,position in entities_golden:
         if not entity_probably_in(entity,entities_inferred):
             FN += 1
-    TN = len(raw_data_entities) - FN - TP - FP
-    RGPPerc = RGPNum/len(entities_inferred)
-    CSP_Precision = TP/(TP+FP)
-    CSP_Recall = TP/(TP+FN)
+    TN = len(src) - FN - TP - FP
+    if len(entities_inferred) != 0:
+        RGPPerc = RGPNum/len(entities_inferred)
+        CSP_Precision = TP/(TP+FP)
+        CSP_Recall = TP/(TP+FN)
+    else :
+        CSP_Precision, CSP_Recall, RGPPerc = 0, 0, 0
     ContentOrdering = damerau_levenshtein_distance(' '.join(entities_golden), ' '.join(entities_inferred))
     return RGPNum, RGPPerc, CSP_Precision, CSP_Recall, ContentOrdering
 
-def extract_entities(comment):
-    macroplan = build_macroplan(comment)
-    tar = []
-    for ent in macroplan:
-        tar += build_ent(ent)
-    return tar
-
-def build_ent(ent):
-    tar = DELIM.join(['<ent>']*2)
-    for key, value in ent.items():
-        tar += ' ' + DELIM.join([key,str(value)])
-    for i in range(ENT_SIZE-len(ent)):
-        tar += ' ' + DELIM.join(['<blank>']*2)
-    return [tar + ' ']
-
-def build_macroplan(data):
-    tokens = nlp(re.sub('\n','',data['comment']).lower())
-    matchs = (infos_recognition(data,tokens,infos),
-    country_recognition(data,tokens),
-    impact_recognition(data,tokens,indexed_data['impacts']),
-    entity_recognition(data,tokens))
-    return order_token(matchs)
-
-def order_token(args):
-    tokens = []
+def order_ent(args):
+    ents = []
     for token_list in args:
-        tokens.extend(token_list)
-        tokens.sort(key=lambda x : x['POSITION'])
-    for i,tok in enumerate(tokens):
-        tok.pop('POSITION')
-        tok['REL_POSITION'] = i
-    return tokens
+        ents.extend(token_list)
+    ents.sort(key=lambda x : x[3].span()[0])
+    return ents
 
-def infos_recognition(data :dict, tokens:doc, infos, treshold=0.9):
+def extract_entities(string, src):
+    infos = [ent for ent in src if ent['TYPE'] != 'impact']
+    impacts = [ent for ent in src if ent['TYPE'] == 'impact']
+    print(string)
+    matchs = (
+        infos_recognition(string,src),)
+        #impact_recognition(tokens,src))
+    matchs = order_ent(matchs)
+    print(matchs)
+    return matchs
+
+def infos_recognition(string: str, infos: List[dict], treshold=0.9):
     """
     Input : data
     Outputs : List of POSITION of first letter of entity name
     """
     results = []
-    target = data['comment']
-    for info in infos:
-        tokenized_info = nlp(data[info])
-        similars = [X for X in tokens.ents if X.similarity(tokenized_info) > treshold]
-        similars.sort(key=lambda x: x.similarity(tokenized_info))
-        if similars != []:
-            results += [{'TYPE':info,info.upper():data[info].lower(),'TYPE':match.text,'POSITION':(match.start_char,match.end_char)} for match in similars]
-        else:
-            similars_tok = [X for X in tokens if X.similarity(tokenized_info) > treshold]
-            results += [{'TYPE':info,info.upper():data[info].lower(),'NAME':match.text,'POSITION':(match.idx,match.idx+len(match))} for match in similars_tok]
-            if similars_tok == []:
-                results += [{'TYPE':info,info.upper():data[info].lower(),'NAME':tokenized_info.text,'POSITION':(match.span()[0],match.span()[1])} for match in re.finditer(tokenized_info.text.lower(),target.lower())]
+    for entity in infos:
+        in_tok = [(entity,key,value,match) for key, value in entity.items() for match in re.finditer(' ('+value.lower()+')\b',string.lower())]
+        in_tok = [match for match in in_tok if match[3] is not None]
+        results += in_tok
     return results
 
 def entity_recognition(data,tokens,treshold=0.9):
@@ -197,3 +189,5 @@ def extract_impact_indexed(index,data,tokens,diff=0.01):
                 else:
                     results += [{'TYPE':'impact','IMPACT_VALUE':trigger[0].text,'POSITION':(trigger[0].idx,trigger[0].idx+len(trigger[0])), 'IMPACT_NAME':index[value], 'IMPACT_PCT': [val for val in index if index[value] == index[val] and val != trigger[0].text][0]}]
     return results
+
+# %%

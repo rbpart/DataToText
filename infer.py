@@ -14,6 +14,6 @@ if __name__=="__main__":
     batch = dataset[[0,1,2,3]]
     outputs = model.infer_to_sentence(batch,0,predictions=100)
     score = bleu_score_(outputs,batch.target.raw)
-    scores = metrics(outputs,batch.target.raw)
+    scores = metrics(outputs,batch.target.raw,batch.source.raw)
 
 # %%
