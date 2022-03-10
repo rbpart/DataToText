@@ -4,8 +4,9 @@ from decoders.hierarchical_decoder import HierarchicalRNNDecoder
 from encoders.hierarchical_transformer import HierarchicalTransformerEncoder
 from tqdm import tqdm
 from model.utils import bleu_score_
-from model.dataset import IDLDataset
+from model.dataset import IDLDataset, Batch
 import model.output_to_text as ott
+from torchtext.vocab import Vocab
 class DataToTextModel(nn.Module):
     def __init__(self, encoder: HierarchicalTransformerEncoder, decoder: HierarchicalRNNDecoder, generator: nn.Sequential,
         dataset_model: IDLDataset = None, device = None) -> None:
@@ -28,7 +29,7 @@ class DataToTextModel(nn.Module):
         for k in tensors.keys():
             self._parameters[k] = tensors[k]
 
-    def forward(self, src, tgt, lengths = None, src_map = None, with_align=False, hidden_state=None) -> torch.Tensor:
+    def forward(self, batch: Batch, with_align=False, hidden_state=None) -> torch.Tensor:
         """Forward propagate a `src` and `tgt` pair for training.
         Possible initialized with a beginning decoder state.
 
@@ -51,41 +52,37 @@ class DataToTextModel(nn.Module):
             * decoder output ``(tgt_len, batch, hidden)``
             * dictionary attention dists of ``(tgt_len, batch, src_len)``
         """
-        enc_state, memory_bank, lengths = self.encoder(src, lengths = lengths)
+        enc_state, memory_bank, lengths = self.encoder(batch.source.vector , lengths = batch.source.lens)
 
         if hidden_state is not None:
             self.decoder.state['hidden'] = hidden_state
         else:
-            self.decoder.init_state(src, memory_bank, enc_state)
+            self.decoder.init_state(batch.source.vector, memory_bank, enc_state)
 
-        dec_out, attns = self.decoder(tgt, memory_bank,
+        dec_out, attns = self.decoder(batch.target.vector, memory_bank,
                                     memory_lengths=lengths,
                                     with_align=with_align)
         if "std" in attns: # et la copy attention elle sert a quoi ?
             attn = attns["std"]
             attn_key = 'std'
-        return  self.generator(dec_out,attn,src_map).transpose(0,1)
+        return  self.generator(dec_out,attn,batch.source.map).transpose(0,1)
 
 
     #Utilitaries for the model
 
-    def infer(self,
-                src: torch.Tensor,
-                src_len: torch.Tensor,
-                src_map: torch.Tensor,
+    def infer(self, batch: Batch,
                 bos_idx, inference_type: str = 'beam_search', **kwargs):
         if inference_type not in ['beam_search','greedy_search']:
             raise ValueError(f'{inference_type} not supported')
         search = getattr(ott,inference_type)
-        return search(self,src,src_len,src_map,bos_idx,**kwargs)
+        return search(self, batch.source.vector,
+                    batch.source.lens, batch.source.map,
+                    bos_idx,**kwargs)
 
     def infer_to_sentence(self,
-                vocab,
-                src: torch.Tensor,
-                src_len: torch.Tensor,
-                src_map: torch.Tensor,
+                vocab, batch: Batch,
                 bos_idx, inference_type: str = 'beam_search', **kwargs):
-        tgts = self.infer(src, src_len, src_map, bos_idx, inference_type, **kwargs)
+        tgts = self.infer(batch, bos_idx, inference_type, **kwargs)
         tgts = tgts.cpu().tolist()
         comments = []
         for sentence in tgts:

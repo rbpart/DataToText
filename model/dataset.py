@@ -14,8 +14,15 @@ from itertools import chain
 import copy
 
 Entity =  namedtuple('Entity',('data','tags'))
+Source = namedtuple('source',('vector','lens','map','raw'))
+Target = namedtuple('target',('vector','lens','raw'))
 
-Batch = namedtuple('Batch', ('src_vectors','src_words','tgt_vectors','tgt_words','tgt_lengths'))
+class Batch():
+    def __init__(self, source: Source, vocab: Vocab, target: Target = None) -> None:
+        self.source = source
+        self.target = target
+        self.vocab = vocab
+
 class IDLDataset(Dataset):
 
     def __init__(self,opts:HyperParameters, type='train', transform = None) -> None:
@@ -48,7 +55,9 @@ class IDLDataset(Dataset):
             src = self.transform(src)
         src = src.transpose(0,2)
         tar = tar.transpose(0,1)
-        return src, src_len, src_map, tar, tar_lengths, tokens, fusedvocab
+        source = Source(src,src_len,src_map,src_raw)
+        target = Target(tar,tar_lengths,tokens)
+        return Batch(source, fusedvocab, target)
 
     def _pad_entity(self,ent_word: list,ent_tag: list, size):
         blank_line_word = self.src_vocab([self.src_pad_word])*(size - len(ent_word))
