@@ -14,9 +14,20 @@ from itertools import chain
 import copy
 
 Entity =  namedtuple('Entity',('data','tags'))
-Source = namedtuple('source',('vector','lens','map','raw'))
-Target = namedtuple('target',('vector','lens','raw'))
 
+class Source():
+    def __init__(self, tensor: torch.Tensor, lens: torch.Tensor,
+                map: torch.Tensor, raw: List[List[Entity]]) -> None:
+        self.tensor = tensor
+        self.lens = lens
+        self.map = map
+        self.raw = raw
+class Target():
+    def __init__(self, tensor: torch.Tensor, lens: torch.Tensor,
+                raw: List[List[str]]) -> None:
+        self.tensor = tensor
+        self.lens = lens
+        self.raw = raw
 class Batch():
     def __init__(self, source: Source, vocab: Vocab, target: Target = None) -> None:
         self.source = source
@@ -40,7 +51,7 @@ class IDLDataset(Dataset):
     def __len__(self):
         return len(self.src_samples)
 
-    def __getitem__(self,idx):
+    def __getitem__(self,idx) -> Batch:
         if torch.is_tensor(idx):
             idx = idx.tolist()
         if type(idx) is int:
@@ -146,6 +157,7 @@ class IDLDataset(Dataset):
         for w in (set(itos_ex) - set(itos)):
             newvocab.append_token(w)
         return newvocab
+
 class BatchSamplerSimilarLength(Sampler):
     def __init__(self, dataset, batch_size, indices=None, shuffle=True):
         self.batch_size = batch_size

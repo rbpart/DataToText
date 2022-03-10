@@ -89,11 +89,10 @@ class Trainer():
         for i,batch in enumerate(self.train_iterator.batch_sampler,1):
             global_step = epoch*self.num_batches + i
             running_time = time.time()
-            src, src_len, src_map,\
-                tar, tar_lengths, tokens, fusedvocab = self.train_dataset[batch]
-            out = self.model(src,tar,src_len,src_map)
-            tar = tar.transpose(1,0)
-            loss = self.criterion(out.transpose(1,2),tar)
+            batch_ = self.train_dataset[batch]
+            out = self.model(batch_)
+            batch_.target.vector = batch_.target.vector.transpose(1,0)
+            loss = self.criterion(out.transpose(1,2),batch_.target.vector)
             if self.opts.reduction == "mean":
                 loss /= accumulate
             loss.backward()
@@ -142,11 +141,10 @@ class Trainer():
         bleu =  0
         with torch.no_grad():
             for batch in iterator.batch_sampler:
-                src, src_len, src_map,\
-                    tar, tar_lengths, tokens, fusedvocab = dataset[batch]
-                out = self.model(src,tar,src_len,src_map)
-                tar = tar.transpose(1,0)
-                loss += self.criterion(out.transpose(1,2),tar)
+                batch_ = dataset[batch]
+                out = self.model(batch_)
+                batch_.target.vector = batch_.target.vector.transpose(1,0)
+                loss += self.criterion(out.transpose(1,2),batch_.target.vector)
         return loss # bleu/num_batches_valid
 
     def train_valid_split(self, train_size = None, folds = None):

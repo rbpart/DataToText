@@ -52,14 +52,14 @@ class DataToTextModel(nn.Module):
             * decoder output ``(tgt_len, batch, hidden)``
             * dictionary attention dists of ``(tgt_len, batch, src_len)``
         """
-        enc_state, memory_bank, lengths = self.encoder(batch.source.vector , lengths = batch.source.lens)
+        enc_state, memory_bank, lengths = self.encoder(batch.source.tensor , lengths = batch.source.lens)
 
         if hidden_state is not None:
             self.decoder.state['hidden'] = hidden_state
         else:
-            self.decoder.init_state(batch.source.vector, memory_bank, enc_state)
+            self.decoder.init_state(batch.source.tensor, memory_bank, enc_state)
 
-        dec_out, attns = self.decoder(batch.target.vector, memory_bank,
+        dec_out, attns = self.decoder(batch.target.tensor, memory_bank,
                                     memory_lengths=lengths,
                                     with_align=with_align)
         if "std" in attns: # et la copy attention elle sert a quoi ?
@@ -75,18 +75,16 @@ class DataToTextModel(nn.Module):
         if inference_type not in ['beam_search','greedy_search']:
             raise ValueError(f'{inference_type} not supported')
         search = getattr(ott,inference_type)
-        return search(self, batch.source.vector,
-                    batch.source.lens, batch.source.map,
+        return search(self, batch,
                     bos_idx,**kwargs)
 
-    def infer_to_sentence(self,
-                vocab, batch: Batch,
+    def infer_to_sentence(self, batch: Batch,
                 bos_idx, inference_type: str = 'beam_search', **kwargs):
         tgts = self.infer(batch, bos_idx, inference_type, **kwargs)
         tgts = tgts.cpu().tolist()
         comments = []
         for sentence in tgts:
-            comments.append(' '.join(vocab.lookup_tokens(sentence)))
+            comments.append(' '.join(batch.vocab.lookup_tokens(sentence)))
         return self.outprocess(comments)
 
     def outprocess(self,sentences):
