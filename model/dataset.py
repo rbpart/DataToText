@@ -48,6 +48,8 @@ class IDLDataset(Dataset):
         self.eos_word = '<eos>'
         self.load_src(getattr(opts,f'{type}_src'))
         self.load_tgt(getattr(opts,f'{type}_tgt'))
+        self.bos_word_idx = self.tgt_vocab[self.bos_word]
+        self.eos_word_idx = self.tgt_vocab[self.eos_word]
 
     def __len__(self):
         return len(self.src_samples)
@@ -57,6 +59,11 @@ class IDLDataset(Dataset):
             idx = idx.tolist()
         if type(idx) is int:
             idx = [idx]
+        if type(idx) is slice:
+            step = idx.step if idx.step is not None else 1
+            start = idx.start if idx.start is not None else 0
+            stop = idx.stop if idx.stop is not None else self.__len__()
+            idx = [i for i in range(start,stop,step)]
         src_raw = [self.src_samples[i] for i in idx]
         tar_tokens = [self.tgt_samples[i] for i in idx]
         srcs, tars = self._src_vector(src_raw),self._tgt_vector(tar_tokens)
@@ -163,11 +170,11 @@ class IDLDataset(Dataset):
         return newvocab
 
 class BatchSamplerSimilarLength(Sampler):
-    def __init__(self, dataset, batch_size, indices=None, shuffle=True):
+    def __init__(self, dataset: IDLDataset, batch_size, indices=None, shuffle=True):
         self.batch_size = batch_size
         self.shuffle = shuffle
         # get the indicies and length
-        self.indices = [(i, tgt_len) for i, (src, tgt, tgt_len, tgt_tokens) in enumerate(dataset)]
+        self.indices = [(i, batch.source.lens) for i, batch in enumerate(dataset)]
         # if indices are passed, then use only the ones passed (for ddp)
         if indices is not None:
             self.indices = torch.tensor(self.indices)[indices].tolist()
@@ -192,4 +199,4 @@ class BatchSamplerSimilarLength(Sampler):
             yield batch
 
     def __len__(self):
-        return len(self.pooled_indices) // self.batch_siz
+        return len(self.pooled_indices) // self.batch_size

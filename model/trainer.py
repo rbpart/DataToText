@@ -10,13 +10,14 @@ from model.parser import HyperParameters
 from model.model import DataToTextModel
 import time
 import os
+import shutil
 from torch.utils.data import random_split
-
+from torch.utils.data.sampler import Sampler
 class Trainer():
     def __init__(self, opts: HyperParameters = None, dataset: IDLDataset = None, test_dataset: IDLDataset = None,
                 optim: torch.optim.Optimizer = None, scheduler: torch.optim.lr_scheduler._LRScheduler = None,
                 criterion: nn.Module = None, model: DataToTextModel = None, checkpoint_file = None,
-                writer: SummaryWriter = None) -> None:
+                writer: SummaryWriter = None, sampler: Sampler = None, create_experiment = False) -> None:
 
         self.checkpoint_file = checkpoint_file
         self.writer = writer
@@ -37,19 +38,33 @@ class Trainer():
         else:
             raise ValueError('Criterion and train and valid datasets should always be provided')
 
+        self.sampler = sampler
         self.test_dataset = test_dataset
         if test_dataset:
             self.test_iterator = DataLoader(test_dataset, opts.batch_size)
 
+        if create_experiment:
+            self.create_experiment()
     @property
     def avg_time(self):
         return np.mean(self.times)
+
+    def create_experiment(self):
+        experiments = os.listdir(self.opts.save_path)
+        experiments = [int(ex.split('t')[-1]) for ex in experiments]
+        maxi = max(experiments)
+        newexp = f'experiment{maxi+1}'
+        os.mkdir(self.opts.save_path+newexp)
+        self.opts.save_path += newexp
+        shutil.copyfile('model/parser.py','model/models/'+newexp+'/parser.py')
 
     def train_k_fold(self, nfolds, save_every = 1000, clip = None, accumulate = 1):
         folds = self.train_valid_split(folds=nfolds)
         for i in range(folds):
             self.train_dataset = ConcatDataset(folds[0:i] + folds[i+1,nfolds])
-            self.train_iterator = DataLoader(self.train_dataset, self.opts.batch_size, shuffle=True ,
+            self.train_iterator = DataLoader(self.train_dataset, self.opts.batch_size,
+                                    shuffle=True if not self.sampler else False,
+                                    sampler = self.sampler,
                                     pin_memory= True if self.opts.device == 'cuda' else False)
             self.valid_dataset = folds[i]
             self.valid_iterator = DataLoader(self.valid_dataset, self.opts.batch_size/2)
@@ -91,14 +106,14 @@ class Trainer():
             running_time = time.time()
             batch_ = self.train_dataset[batch]
             out = self.model(batch_)
-            batch_.target.vector = batch_.target.vector.transpose(1,0)
-            loss = self.criterion(out.transpose(1,2),batch_.target.vector)
+            batch_.target.tensor = batch_.target.tensor.transpose(1,0)
+            loss = self.criterion(out.transpose(1,2),batch_.target.tensor)
             if self.opts.reduction == "mean":
                 loss /= accumulate
             loss.backward()
             loss_ = loss.detach().cpu()
             running_loss += loss_
-            if i % accumulate == 0:
+            if i % accumulate == 0 or (i+1) == len(self.train_iterator.batch_sampler):
                 if isinstance(clip,float):
                     unclipped = nn.utils.clip_grad.clip_grad_norm_(self.model.parameters(), clip)
                     clipped = np.sqrt(np.sum([p.grad.detach().cpu().data.norm(2)**2 for p in self.model.parameters()]))
@@ -109,12 +124,8 @@ class Trainer():
                                 loss_,(time.time()-running_time)/60, clipped, unclipped)
             if global_step % save_every == 0:
                 self.save(global_step)
-        if i % accumulate != 0:
-            self.optim.step()
-            self.optim.zero_grad()
         self.scheduler.step()
         return running_loss * accumulate
-
 
     def report_iteration(self,epoch,iter,lr,loss,time,clipped, unclipped):
         self.times.append(time)
@@ -127,10 +138,10 @@ class Trainer():
             self.writer.add_scalar('Training/UnclippedGrad',unclipped,iter+epoch*self.num_batches)
 
     def report_epoch(self,epoch,start_time,train_loss,valid_loss):
-            print('-' * 89)
+            print('-' * 100)
             print(f'| end of epoch {epoch:3d} | elapsed time: {(time.time()-start_time)/60:3.2f} min | '
                 f'avg train loss {train_loss/len(self.train_dataset):5.2f} | avg valid loss {valid_loss/len(self.valid_dataset):5.2f} ')
-            print('-' * 89)
+            print('-' * 100)
             if self.writer is not None:
                 self.writer.add_scalar('Eval/AvgLossTrain',train_loss/len(self.train_dataset),epoch)
                 self.writer.add_scalar('Eval/AvgLossValid',valid_loss/len(self.valid_dataset),epoch)
@@ -138,23 +149,24 @@ class Trainer():
 
     def evaluate(self, dataset, iterator: DataLoader):
         loss = 0
-        bleu =  0
         with torch.no_grad():
             for batch in iterator.batch_sampler:
                 batch_ = dataset[batch]
                 out = self.model(batch_)
-                batch_.target.vector = batch_.target.vector.transpose(1,0)
-                loss += self.criterion(out.transpose(1,2),batch_.target.vector)
-        return loss # bleu/num_batches_valid
+                batch_.target.tensor = batch_.target.tensor.transpose(1,0)
+                loss += self.criterion(out.transpose(1,2),batch_.target.tensor)
+        return loss
 
     def train_valid_split(self, train_size = None, folds = None):
         if train_size is not None:
             train, valid = random_split(self.dataset, [int(len(self.dataset)*train_size),int(len(self.dataset)*(1-train_size))+1])
             self.train_dataset = train
-            self.train_iterator = DataLoader(self.train_dataset, self.opts.batch_size, shuffle=True ,
+            self.train_iterator = DataLoader(self.train_dataset, self.opts.batch_size,
+                                    shuffle=True if not self.sampler else False,
+                                    sampler = self.sampler,
                                     pin_memory= True if self.opts.device == 'cuda' else False)
             self.valid_dataset = valid
-            self.valid_iterator = DataLoader(self.valid_dataset, self.opts.batch_size*4)
+            self.valid_iterator = DataLoader(self.valid_dataset, self.opts.batch_size)
             self.num_batches = int(len(self.train_dataset)/self.opts.batch_size)
             return
         if folds is not None:

@@ -5,6 +5,7 @@ import en_core_web_lg
 from model.utils import damerau_levenshtein_distance
 import warnings
 from typing import List
+import json
 warnings.filterwarnings("ignore", message=r"\[W008\]", category=UserWarning)
 nlp = en_core_web_lg.load()
 DATAPATH = 'datasets/idl/'
@@ -34,28 +35,29 @@ def reprocess(src):
     return processed
 
 def metrics(batch_inferred, batch_golden, batch_src):
+    metric = []
     for inferred, golden, src in zip(batch_inferred,batch_golden,batch_src):
-        metric = _metrics(inferred,golden,src)
+        metric += [_metrics(inferred,golden,src)]
     return metric
 
 def _metrics(inferred_str,golden_tokens,src):
     # TODO: suppress when all nice and tidy
     src = reprocess(src)
+    print('-'*50)
     golden_str = ' '.join(golden_tokens).replace(' <blank>','')
     entities_golden = extract_entities(golden_str,src)
     entities_inferred = extract_entities(inferred_str,src)
-
     RGPPerc, RGPNum = 0, 0
     TP,FP, FN, TN = 0,0,0,0
     ContentOrdering = 0
-    for entity,key,value,position in entities_inferred:
+    for key,value,position,entity in entities_inferred:
         if entity_probably_in(entity,src):
             RGPNum += 1
         if entity_probably_in(entity,entities_golden):
             TP += 1
         else:
             FP += 1
-    for entity,key,value,position in entities_golden:
+    for key,value,position in entities_golden:
         if not entity_probably_in(entity,entities_inferred):
             FN += 1
     TN = len(src) - FN - TP - FP
@@ -65,54 +67,73 @@ def _metrics(inferred_str,golden_tokens,src):
         CSP_Recall = TP/(TP+FN)
     else :
         CSP_Precision, CSP_Recall, RGPPerc = 0, 0, 0
-    ContentOrdering = damerau_levenshtein_distance(' '.join(entities_golden), ' '.join(entities_inferred))
+    ContentOrdering = damerau_levenshtein_distance(' '.join([json.dumps(entity[3]) for entity in entities_golden]),
+                                                    ' '.join([json.dumps(entity[3]) for entity in entities_inferred]))
     return RGPNum, RGPPerc, CSP_Precision, CSP_Recall, ContentOrdering
 
 def order_ent(args):
     ents = []
     for token_list in args:
         ents.extend(token_list)
-    ents.sort(key=lambda x : x[3].span()[0])
+    ents.sort(key=lambda x : x[2].span()[0])
     return ents
 
 def extract_entities(string, src):
     infos = [ent for ent in src if ent['TYPE'] != 'impact']
     impacts = [ent for ent in src if ent['TYPE'] == 'impact']
+
     print(string)
     matchs = (
-        infos_recognition(string,src),)
-        #impact_recognition(tokens,src))
+        company_recognition(string,src),impact_recognition(string,src))
     matchs = order_ent(matchs)
     print(matchs)
     return matchs
 
-def infos_recognition(string: str, infos: List[dict], treshold=0.9):
+def company_recognition(string: str, infos: List[dict]):
     """
     Input : data
     Outputs : List of POSITION of first letter of entity name
     """
     results = []
     for entity in infos:
-        in_tok = [(entity,key,value,match) for key, value in entity.items() for match in re.finditer(' ('+value.lower()+')\b',string.lower())]
-        in_tok = [match for match in in_tok if match[3] is not None]
+        in_tok = [(key,value,match,entity) for key, value in entity.items()
+                                                for match in re.finditer(fr'\b{value.lower()}\b',string.lower())
+                                                    if entity['TYPE'] == 'company']
         results += in_tok
     return results
 
-def entity_recognition(data,tokens,treshold=0.9):
+def impact_recognition(string: str, infos: List[dict]):
+    """
+    Input : data
+    Outputs : List of POSITION of first letter of entity name
+    """
     results = []
-    tokenized_info = nlp(data['name'])
-    similars = [X for X in tokens.ents if X.similarity(tokenized_info) > treshold]
-    similars.sort(key=lambda x: x.similarity(tokenized_info))
-    for ent in tokens.ents:
-        if ent.label_ == 'ORG':
-            results += [{'TYPE':'company','NAME':ent.text,'MAIN_SECTOR':data['main_sector'],'SUB_SECTOR':data['sub_sector'],'POSITION':(ent.start_char,ent.end_char)}]
+    for entity in infos:
+        in_tok = [(key,value,match) for key, value in entity.items()
+                                                for match in re.finditer(fr'\b{value.lower()}\b',string.lower())
+                                                    if entity['TYPE'] == 'impact']
+        results += in_tok
     return results
 
-def country_recognition(data, tokens):
+def impact_recognition_old(data,tokens,impacts,treshold = 0.8):
+    """
+    Input : data
+    Outputs : List of POSITION of first letter of impat
+    """
     results = []
-    for ent in tokens.ents:
-        if ent.label_ == 'GPE':
-            results += [{'TYPE':'country','PLACE':ent.text,'POSITION':(ent.start_char,ent.end_char)}]
+    prefix = data['impact_type'].split('::')[1]
+    if prefix == 'MSA':
+        prefix = 'CBF'
+    concerned_impacts = impacts[prefix]
+    index = impact_percentage_index(reversed_index(concerned_impacts,[prefix]))
+    results += extract_impact_indexed(index,data,tokens)
+    # for impact in concerned_impacts:
+    #     try:
+    #         sub_impacts = [sb for sb in concerned_impacts[impact].keys() if sb in ['Occupational','ChangeOfLandUse','Ghg','Acidification','Eutrophication','scope3Upstream']]
+    #     except:
+    #         sub_impacts = []
+    #     for imp in [impact]+sub_impacts:
+    #         results += extract_impact_NER(imp,data,tokens,treshold)
     return results
 
 def splitPascal(string:str):
@@ -123,7 +144,7 @@ def splitPascal(string:str):
         new += c
     return new.strip().lower()
 
-def impact_recognition(data,tokens,impacts,treshold = 0.8):
+def impact_recognition2(data,tokens,impacts,treshold = 0.8):
     """
     Input : data
     Outputs : List of POSITION of first letter of impat

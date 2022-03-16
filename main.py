@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch
 from model.parser import HyperParameters
 from model.build_model import build_model
-from model.dataset import IDLDataset
+from model.dataset import IDLDataset, BatchSamplerSimilarLength
 from model.trainer import Trainer
 from torch.utils.tensorboard.writer import SummaryWriter
 # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
@@ -17,16 +17,24 @@ if __name__=="__main__":
 
     dataset = IDLDataset(hparameters, 'train')
     test_dataset = IDLDataset(hparameters, 'test')
-
+    #sampler = BatchSamplerSimilarLength(dataset,hparameters.batch_size,shuffle=True)
     model = build_model(hparameters,dataset)
-    # writer.add_graph(model,(src,tar,src_len,src_map))
+    # writer.add_graph(model,dataset[0:2])
 
-    criterion = nn.CrossEntropyLoss(ignore_index=dataset.tgt_vocab([dataset.tgt_pad_word])[0],
+    criterion = nn.CrossEntropyLoss(
+                        ignore_index=dataset.tgt_vocab([dataset.tgt_pad_word])[0],
                         reduction=hparameters.reduction)
     optim = torch.optim.Adam(model.parameters(), lr=hparameters.learning_rate)
-    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim,[lambda epoch: 0.95**(epoch/100)])
+    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim,[lambda epoch: 0.95**(epoch)])
 
     trainer = Trainer(hparameters, dataset, test_dataset,
-                    optim, lr_scheduler, criterion, model, writer=writer)
+                    optim, lr_scheduler, criterion,
+                    model, writer=writer, create_experiment=True)
 
-    trainer.train(save_every=750, accumulate=4, clip=1.0)
+    trainer.train(save_every=1500,
+                accumulate=hparameters.accumulate,
+                clip=hparameters.clip,
+                validate_every=1,
+                metrics_every=5)
+
+# %%
