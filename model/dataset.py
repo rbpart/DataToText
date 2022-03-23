@@ -66,6 +66,8 @@ class IDLDataset(Dataset):
             idx = [i for i in range(start,stop,step)]
         src_raw = [self.src_samples[i] for i in idx]
         tar_tokens = [self.tgt_samples[i] for i in idx]
+        self.max_comment_len = np.max([len(samp) for samp in tar_tokens])
+        self.max_entities = np.max([len(sr) for sr in src_raw])
         srcs, tars = self._src_vector(src_raw),self._tgt_vector(tar_tokens)
         tar, tar_lengths, tokens = tars
         src, src_len = srcs
@@ -102,6 +104,7 @@ class IDLDataset(Dataset):
             lenghts.append(leng)
             words.append(word)
             tags.append(tag)
+
         src = torch.tensor([words,tags], dtype=torch.long, device=self.device)
         lenghts = torch.tensor(lenghts,device = self.device, dtype=torch.long)
         return src, lenghts

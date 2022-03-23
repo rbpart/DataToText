@@ -32,7 +32,6 @@ def tile(x, count, dim=0):
         x = x.permute(perm).contiguous()
     return x
 
-
 class MultiHeadSelfAttention(torch.nn.Module):
     """
     if glu_depth is not zero, we use GatedLinear layers instead of regular layers.

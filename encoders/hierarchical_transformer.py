@@ -182,6 +182,8 @@ class HierarchicalTransformerEncoder(nn.Module):
         See :func:`EncoderBase.forward()`
 
         src (tensor) [seq_len, bs, 2]
+        # We average the units representation to give a final encoding
+        # and be inline with the onmt framework
         2 <-- (value, type)
         """
         if lengths is None:
@@ -193,7 +195,7 @@ class HierarchicalTransformerEncoder(nn.Module):
 
          # sanity check
         assert seq_len % n_ents == 0
-        # assert seq_len == lengths.max()
+        assert seq_len == lengths.max()
 
         # We build the masks for self attention and decoding
         eye = block_eye(n_ents, self.ent_size).to(src.device)
@@ -210,7 +212,9 @@ class HierarchicalTransformerEncoder(nn.Module):
         # units [seq_len, bs, hidden_size]
         units = self.unit_encoder(embs, mask=self_attn_mask)
 
-        # chunks & units_tokens [n_units, bs, hidden_size]
+        # chunks & units_tokens [n_ents, bs, hidden_size]
+        # encode chaque entité. Les units tokens sont les aggregation des
+        # records pour chaque entité, les h_i
         units_tokens = units[range(0, seq_len, self.ent_size), :, :]
         chunks = self.chunk_encoder(units_tokens, mask=chunk_mask)
 
@@ -224,10 +228,9 @@ class HierarchicalTransformerEncoder(nn.Module):
             chunk_mask[:, 0, :].unsqueeze(0).eq(float('-inf'))
         )
 
-        # We average the units representation to give a final encoding
-        # and be inline with the onmt framework
-        # [1, bs, hidden_size] encodage "moyen" d'une entité,
+        # [1, bs, hidden_size] encodage "moyen" des entités de la table,
         # l'unsqueeze permet d'avoir la dimension 0 a une size 1
+        # z dont parle l'article
         encoder_final = chunks.mean(dim=0).unsqueeze(0)
         # encoder_final = (encoder_final, encoder_final)
 

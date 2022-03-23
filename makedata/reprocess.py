@@ -11,10 +11,11 @@ from makedata.elastic import Fetcher
 from model.parser import HyperParameters
 from torchtext.vocab import build_vocab_from_iterator, Vocab
 from joblib import Parallel, delayed
+import pycountry
 es = Fetcher()
 fields = es.fields
 
-DATAPATH = 'datasets/idl/'
+DATAPATH = 'datasets/idl2/'
 DELIM = "|"
 ENT_SIZE= HyperParameters.ENT_SIZE
 
@@ -38,45 +39,27 @@ def preprocess(dataset='idl', to_drop = []):
     file, source, target = preprocessed[0], preprocessed[1], preprocessed[2]
     return(file,source, target)
 
-def preprocess_one_saved(data):
-    try:
-        target = re.sub('\n','',data['comment']).lower()
-        if len(target.split(' ')) < 10:
-            return None
-        raw = data
-        source = build_source(data)
-        return (raw,source,target)
-    except Exception as e:
-        return None
-
 def preprocess_one(data):
     try:
         data['es_data'] = es.fetch_data(data)
-        target = re.sub('\n','',data['comment']).lower()
-        if len(target.split(' ')) < 10:
-            return None
-        data['country'] = es.fetch_country(data)
+        code = es.fetch_country(data)
+        data['country'] = pycountry.countries.get(alpha_2 = code).name.lower()
         raw = data
         source = build_source(data)
+        target = re.sub('\n','',data['comment']).lower()
         return (raw,source,target)
     except Exception as e:
         return None
 
 def build_source(data):
-    tar = ''
-    for list_ent in build_macroplan(data):
-        tar += build_ent(list_ent)
-    return tar
+    return ' && '.join([build_ent(list_ent)
+        for list_ent in build_macroplan(data)])
 
 def build_ent(list_ent):
     res = ''
     for ent in list_ent:
-        tar = DELIM.join(['<ent>']*2)
-        for key, value in ent.items():
-            tar += ' ' + DELIM.join([re.sub(' ','_',str(value)),key])
-        for i in range(ENT_SIZE-len(ent)):
-            tar += ' ' + DELIM.join(['<blank>']*2)
-        res += tar + ' '
+        name = ent['NAME'] if 'NAME' in ent else ent['IMPACT_NAME']
+        res += ' && '.join([f'{name} | {key} | {value}'  for key, value in ent.items() if value != name])
     return res
 
 def build_macroplan(data):
@@ -147,47 +130,9 @@ def impact_percentage_index(index:dict):
 
     return res
 
-Entity =  namedtuple('Entity',('data','tags'))
-
-def _load_entity( entity:str, info_token = ' ', split_token = '|'):
-    data, tags = [], []
-    for info in entity.split(info_token):
-        data.append(info.split(split_token)[0])
-        tags.append(info.split(split_token)[1])
-    return ['<ent>']+data,  ['<ent>']+tags
-
-def _load_entities(line:str,entity_token = '<ent>|<ent>'):
-    return [Entity(*_load_entity(entity.strip())) for entity in line.split(entity_token) if entity != '']
-
-def vocab_src(data):
-    samples = [_load_entities(line.strip()) for line in tqdm(data) if line != '']
-    src_vocab : Vocab = build_vocab_from_iterator([_process_src(entity.data) for sample in samples for entity in sample ])
-    src_vocab_feat : Vocab = build_vocab_from_iterator([entity.tags for sample in samples for entity in sample ])
-    return src_vocab, src_vocab_feat
-
-def _process_src(entitydata: List[str]):
-    return [re.sub('_',' ',data.lower()) for data in entitydata]
-
-def _process_tgt(line:str):
-    return ['<bos>'] + line.lower().split(' ') + ['<eos>']
-
-def vocab_tgt(data):
-    samples = [_process_tgt(line) for line in tqdm(data) if line != '']
-    tgt_vocab : Vocab = build_vocab_from_iterator(samples,specials=['<unk>','<blank>','<bos>','<eos>'])
-    tgt_vocab.set_default_index(tgt_vocab['<unk>'])
-    return tgt_vocab
-
-def build_vocabs(src,tgt, save = True):
-    srcv,srvf = vocab_src(src)
-    tgtv = vocab_tgt(tgt)
-    if save:
-        torch.save(srcv,DATAPATH+'/src_word.vocab.pt')
-        torch.save(srvf,DATAPATH+'/src_feat.vocab.pt')
-        torch.save(tgtv,DATAPATH+'/tgt_word.vocab.pt')
 
 if __name__ == '__main__':
     raw, data, target = preprocess()
-    build_vocabs(data,target)
     items = train_test_split_save(data,target,save=True)
     with open(DATAPATH+'comments_and_data.json','w') as file:
         json.dump(items[0],file)

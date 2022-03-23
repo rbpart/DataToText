@@ -48,7 +48,8 @@ class HierarchicalRNNDecoder(RNNDecoderBase):
         super(RNNDecoderBase, self).__init__(
             attentional=attn_type != "none" and attn_type is not None)
 
-        assert not coverage_attn
+        # assert not coverage_attn
+        coverage_attn = False
         self.ent_size = HyperParameters.ENT_SIZE
 
         self.bidirectional_encoder = bidirectional_encoder

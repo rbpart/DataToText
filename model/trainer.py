@@ -42,7 +42,6 @@ class Trainer():
         self.test_dataset = test_dataset
         if test_dataset:
             self.test_iterator = DataLoader(test_dataset, opts.batch_size)
-
         if create_experiment:
             self.create_experiment()
     @property
@@ -56,6 +55,7 @@ class Trainer():
         newexp = f'experiment{maxi+1}'
         os.mkdir(self.opts.save_path+newexp)
         self.opts.save_path += newexp
+        self.runfile = self.writer.log_dir+ '/' + os.listdir(self.writer.log_dir)[0]
         shutil.copyfile('model/parser.py','model/models/'+newexp+'/parser.py')
 
     def train_k_fold(self, nfolds, save_every = 1000, clip = None, accumulate = 1):
@@ -120,22 +120,23 @@ class Trainer():
                 self.optim.step()
                 self.optim.zero_grad()
                 loss = 0
-            self.report_iteration(epoch,i,self.scheduler.get_last_lr()[0],
-                                loss_,(time.time()-running_time)/60, clipped, unclipped)
+            self.report_iteration(epoch,i,self.optim.param_groups[0]['lr'],
+                                loss_,(time.time()-running_time)/60, unclipped, clipped)
             if global_step % save_every == 0:
                 self.save(global_step)
-        self.scheduler.step()
+        self.scheduler_(running_loss/len(self.train_dataset))
         return running_loss * accumulate
 
-    def report_iteration(self,epoch,iter,lr,loss,time,clipped, unclipped):
+    def report_iteration(self,epoch,iter,lr,loss,time, unclipped, clipped):
         self.times.append(time)
+        shutil.copy(self.runfile,self.opts.save_path)
         print(f'| epoch {epoch:3d} | {iter:3d}/{int(self.num_batches)+1:3d} batches | '+
                   f'lr {lr:1.5f} | {time*1000:5.2f} ms/batch  | avg loss {loss:5.2f} | '+
-                  f'grad clipped {clipped:5.2f} | ETA: {self.avg_time*(self.num_batches-iter):5.2f} min', end='\r')
+                  f'ETA: {self.avg_time*(self.num_batches-iter):5.2f} min', end='\r')
         if self.writer is not None:
             self.writer.add_scalar('Training/Loss',loss,iter+epoch*self.num_batches)
-            self.writer.add_scalar('Training/NormOfClippedGrad',clipped,iter+epoch*self.num_batches)
             self.writer.add_scalar('Training/UnclippedGrad',unclipped,iter+epoch*self.num_batches)
+            self.writer.add_scalar('Training/NormOfClippedGrad',clipped,iter+epoch*self.num_batches)
 
     def report_epoch(self,epoch,start_time,train_loss,valid_loss):
             print('-' * 100)
@@ -175,8 +176,14 @@ class Trainer():
             return folds
         raise
 
+    def scheduler_(self, value = None):
+        if type(self.scheduler) == torch.optim.lr_scheduler.ReduceLROnPlateau:
+            self.scheduler.step(value)
+        elif self.scheduler is not None:
+            self.scheduler.step()
+
     def save(self,num):
-        checkpoint_file = self.opts.save_path+f'checkpoint_{num}/'
+        checkpoint_file = self.opts.save_path+'/'+f'checkpoint_{num}/'
         os.mkdir(checkpoint_file)
         torch.save(self.model.state_dict(),checkpoint_file+f'model_{num}.pt')
         torch.save(self.optim.state_dict(),checkpoint_file+f'optim_{num}.pt')

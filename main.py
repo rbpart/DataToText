@@ -25,7 +25,7 @@ if __name__=="__main__":
                         ignore_index=dataset.tgt_vocab([dataset.tgt_pad_word])[0],
                         reduction=hparameters.reduction)
     optim = torch.optim.Adam(model.parameters(), lr=hparameters.learning_rate)
-    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim,[lambda epoch: 0.95**(epoch)])
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim,patience=2,threshold=5e-3)
 
     trainer = Trainer(hparameters, dataset, test_dataset,
                     optim, lr_scheduler, criterion,
@@ -34,7 +34,6 @@ if __name__=="__main__":
     trainer.train(save_every=1500,
                 accumulate=hparameters.accumulate,
                 clip=hparameters.clip,
-                validate_every=1,
-                metrics_every=5)
+                validate_every=1)
 
 # %%

@@ -32,7 +32,8 @@ def beam_search(model,
                 beam_width = 5,
                 batch_size = 50,
                 progress_bar = True,
-                best = True):
+                best = True,
+                anti_begayement = True):
     """
     Implements Beam Search to compute the output with the sequences given in X. The method can compute
     several outputs in parallel with the first dimension of X.
@@ -102,6 +103,8 @@ def beam_search(model,
                     model.forward(batch_)[:, -1, :].log_softmax(-1))
             next_probabilities = torch.cat(next_probabilities, axis = 0)
             next_probabilities = next_probabilities.reshape((-1, beam_width, next_probabilities.shape[-1]))
+            if anti_begayement:
+                next_probabilities[:,:,Y[:,i-1]] = 1e-20
             probabilities = probabilities.unsqueeze(-1) + next_probabilities
             probabilities = probabilities.flatten(start_dim = 1)
             probabilities, idx = probabilities.topk(k = beam_width, axis = -1)
