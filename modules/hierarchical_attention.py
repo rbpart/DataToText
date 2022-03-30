@@ -110,7 +110,7 @@ class HierarchicalAttention(torch.nn.Module):
     def __init__(self, dim, coverage=False, attn_type="dot",
                  attn_func="softmax", use_pos=True):
         super().__init__()
-        assert not coverage
+        # assert not coverage
 
         self.ent_size = HyperParameters.ENT_SIZE
 

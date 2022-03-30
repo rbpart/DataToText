@@ -62,7 +62,7 @@ def inferred_to_sentence(tensor, dataset):
 def bleu_score_(comment_str: List[str], tokens: List[List[str]]):
     tok_candidates = [sent.split(' ') for sent in comment_str]
     tok_copy = json.loads(json.dumps(tokens))
-    for i, cand in enumerate(tok_candidates):
+    for i, cand in enumerate(tok_copy):
         tok_copy[i] += ['<blank>']*(len(cand)-len(tok_copy[i]))
         tok_copy[i] = [tok_copy[i]]
     return bleu_score(tok_candidates,tok_copy,max_n=1,weights=[1])

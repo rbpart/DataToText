@@ -17,12 +17,12 @@ class HyperParameters(ArgumentParser):
     tgt_word_vec_size = 300
     feat_vec_size = 300
     feat_vec_exponent = 1
-    rnn_size = 600
-    feat_merge = 'concat'
+    feat_merge = 'mlp'
+    key_and_value = True
     dropout = [0.5]
     batch_size = 8
     num_epochs = 50
-    learning_rate = 0.0005
+    learning_rate = 0.001
     device = "cuda" if torch.cuda.is_available() else "cpu"
     save_path = "model/models/"
     pretrained_tgt_embeddings_path = 'pretrained_embeddings/glove/glove.6B.300d.txt'
@@ -30,7 +30,11 @@ class HyperParameters(ArgumentParser):
     reduction = "mean"
     accumulate=8
     clip =1.0
+    use_pos = True
+
     def __init__(self) -> None:
         super().__init__(self)
+        self.rnn_size = self.feat_vec_size+self.src_word_vec_size \
+                                if self.feat_merge == 'concat' else 300
 
 # %%

@@ -1,13 +1,15 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from tqdm import tqdm
 import torch.utils.data as tud
 from model.dataset import Batch, Source, Target
 
+SOS_token = 0
+EOS_token = 1
+MAX_LENGTH = 50
 
 def greedy_search(model,batch: Batch,
                 bos_idx,
+                eos_idx,
                 predictions = 20,
                 progress_bar = True):
     with torch.no_grad():
@@ -28,12 +30,13 @@ def greedy_search(model,batch: Batch,
 def beam_search(model,
                 batch: Batch,
                 bos_idx,
+                eos_idx,
                 predictions = 20,
                 beam_width = 5,
                 batch_size = 50,
                 progress_bar = True,
                 best = True,
-                anti_begayement = True):
+                block_n = 5):
     """
     Implements Beam Search to compute the output with the sequences given in X. The method can compute
     several outputs in parallel with the first dimension of X.
@@ -57,14 +60,16 @@ def beam_search(model,
         The estimated log-probabilities for the output sequences. They are computed by iteratively adding the
         probability of the next token at every step.
     """
-    device = next(model.parameters()).device
+    device = model.device
+    memory = []
     with torch.no_grad():
         Y = torch.ones(1, batch.source.tensor.shape[1], device=device, dtype=torch.long)*bos_idx
         batch.target.tensor = Y
         # The next command can be a memory bottleneck, can be controlled with the batch
         # size of the predict method.
-        next_probabilities = model.forward(batch)[:, -1, :]
+        next_probabilities = model.forward(batch,inference=True)[:, -1, :]
         vocabulary_size = model.decoder.embeddings.num_embeddings
+        extended_vocabulary_size = next_probabilities.shape[-1]
         probabilities, next_chars = next_probabilities.squeeze().log_softmax(-1)\
         .topk(k = beam_width, axis = -1)
         Y = Y.repeat((beam_width, 1)).view(1,-1)
@@ -100,20 +105,50 @@ def beam_search(model,
                             batch.vocab,
                             Target(torch.where(y>=vocabulary_size,0,y),None,None))
                 next_probabilities.append(
-                    model.forward(batch_)[:, -1, :].log_softmax(-1))
+                    model.forward(batch_,inference=True)[:, -1, :].log_softmax(-1))
             next_probabilities = torch.cat(next_probabilities, axis = 0)
             next_probabilities = next_probabilities.reshape((-1, beam_width, next_probabilities.shape[-1]))
-            if anti_begayement:
-                next_probabilities[:,:,Y[:,i-1]] = 1e-20
             probabilities = probabilities.unsqueeze(-1) + next_probabilities
-            probabilities = probabilities.flatten(start_dim = 1)
-            probabilities, idx = probabilities.topk(k = beam_width, axis = -1)
-            next_chars = torch.remainder(idx, vocabulary_size).flatten().unsqueeze(-1)
-            best_candidates = (idx / vocabulary_size).long()
+            probabilities = length_penalty(Y,probabilities,eos_idx)
+            masked_probabilities = block_n_gram(Y,probabilities,block_n,i,memory)
+            masked_probabilities = masked_probabilities.flatten(start_dim = 1)
+            probabilities, idx = masked_probabilities.topk(k = beam_width, axis = 1)
+            next_chars = torch.remainder(idx, extended_vocabulary_size).flatten().unsqueeze(-1)
+            best_candidates = (idx / extended_vocabulary_size).long() # gives the number of the candidate
+            best_candidates += torch.arange(Y.shape[0] // beam_width, device = device).unsqueeze(-1) * beam_width
+
             Y = Y.transpose(0,1)
-            best_candidates += torch.arange(Y.shape[1] // beam_width, device = device).unsqueeze(-1) * beam_width
-            Y[i,:] = Y[i,best_candidates.flatten()-1]
+            Y[:,:] = Y[:,best_candidates.flatten()]
             Y = torch.cat((Y, next_chars.view(1,-1)), axis = 0)
+        Y = Y.split(beam_width,dim=1)
+        Y = torch.stack(Y)
         if best:
-            return Y.view(-1, beam_width, predictions+1)[:,0,:]
-        return Y.view(-1, beam_width, predictions+1), probabilities
+            return Y[:,:,0]
+        return Y #, probabilities.view(-1, 1, predictions+1)
+
+def length_penalty(Y: torch.Tensor,probabilities: torch.Tensor, eos_idx, alpha = 0.8):
+    dim1,dim2 = (Y == eos_idx).nonzero(as_tuple=True)
+    bs = probabilities.shape[0]
+    lengths = torch.tensor([Y.shape[1] for i in range(Y.shape[0])], device=Y.device)
+    lengths[dim1] = Y[dim1,dim2]
+    length_penalty = (((5+lengths)**alpha)/((5+1)**alpha)).view(bs,-1,1)
+    return probabilities / length_penalty
+
+def block_n_gram(Y: torch.Tensor, probabilities: torch.Tensor,block_n,i, memory):
+    if block_n > 0:
+        masked_probabilities = probabilities.clone()
+        n = min(block_n,i)
+        bs,bw,sz = probabilities.shape
+        for block in range(i-n,i+2):
+            masked_probabilities[:,:,Y[:,block]] = float('-inf')
+    return masked_probabilities
+
+def coverage_penalty_wu(Y: torch.Tensor, probabilities: torch.Tensor, attn_coverage_prob: torch.Tensor, beta):
+    pij = attn_coverage_prob[range(Y.shape[0]),Y[:,]]
+    mini = torch.minimum(pij.sum(dim=-1),torch.tensor(1,device=Y.device)).log()
+    return probabilities + beta * mini.sum(dim = -1)
+
+def coverage_penalty_sum(Y: torch.Tensor, probabilities: torch.Tensor, attn_coverage_prob: torch.Tensor, beta):
+    pij = attn_coverage_prob[range(Y.shape[0]),Y[:,]]
+    maxi = torch.maximum(pij.sum(dim=-1),torch.tensor(1,device=Y.device))
+    return probabilities + beta * maxi.sum(dim = -1)

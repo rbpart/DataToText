@@ -80,7 +80,7 @@ def build_decoder(opts,loader:IDLDataset) -> nn.Module :
         hidden_size=opts.rnn_size, num_layers=2,
         coverage_attn=True,
         bidirectional_encoder=True,
-        rnn_type="LSTM", embeddings=decoder_embeddings,
+        rnn_type="LSTM", embeddings=decoder_embeddings, use_pos=opts.use_pos,
         dropout=opts.dropout[0] if type(opts.dropout) is list else opts.dropout)
     return decoder
 

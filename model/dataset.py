@@ -12,7 +12,8 @@ from torch.nn.functional import one_hot
 from torchtext.vocab.vocab_factory import build_vocab_from_iterator
 from torchtext.vocab.vocab import Vocab
 from itertools import chain
-import copy
+from copy import copy
+import nlpaug.augmenter.word as naw
 
 Entity =  namedtuple('Entity',('data','tags'))
 
@@ -140,17 +141,23 @@ class IDLDataset(Dataset):
             samples = [self._load_entities(line.strip()) for line in tqdm(file.readlines()) if line != '']
         self.max_entities = np.max([len(samp) for samp in samples])
         self.src_samples : List[Entity] = samples
+        self.base_src = copy(self.src_samples)
         self.src_vocab : Vocab = torch.load(self.opts.src_word_vocab)
         self.src_vocab_feat : Vocab = torch.load(self.opts.src_feat_vocab)
 
     def _process(self,line:str):
-        return line.split(' ')
+        s = line.replace(r'\n','').lower()
+        # s = re.sub('([.,!?()])', r' \1 ', s)
+        # s = re.sub('\s{2,}', ' ', s)
+        s = re.sub(r'[^\w\s]','',s) # punctuationless for now
+        return s.split(' ')
 
     def load_tgt(self,path):
         with open(path,'r') as file:
             samples = [self._process(line) for line in tqdm(file.readlines()) if line != '']
         self.max_comment_len = np.max([len(samp) for samp in samples])
         self.tgt_samples : List[str] = samples
+        self.base_tgt = copy(self.tgt_samples)
         self.tgt_vocab : Vocab = torch.load(self.opts.tgt_vocab)
         self.len_tgt_vocab = len(self.tgt_vocab)
 
@@ -160,17 +167,32 @@ class IDLDataset(Dataset):
         fused_vocab = self.fuse_vocabs(self.tgt_vocab,data_vocab)
         max_len = self.max_entities*self.opts.ENT_SIZE
         data = [fused_vocab(sample) + fused_vocab(['<blank>'])*(max_len-len(sample)) for sample in data]
-        src_map = torch.tensor(data, dtype=torch.long, device=self.device)
-        src_map = one_hot(src_map).transpose(0,1).to(torch.float).to_sparse()
+        with torch.autocast(device_type=self.device):
+            src_map = torch.tensor(data, dtype=torch.long, device=self.device)
+            src_map = one_hot(src_map).transpose(0,1).to(torch.float).to_sparse()
         return src_map, fused_vocab
 
     def fuse_vocabs(self,vocab_base: Vocab,vocab_extension: Vocab):
-        newvocab = copy.copy(vocab_base)
+        newvocab = copy(vocab_base)
         itos = vocab_base.get_itos()
         itos_ex = vocab_extension.get_itos()
         for w in (set(itos_ex) - set(itos)):
             newvocab.append_token(w)
         return newvocab
+
+    def augment_data(self, indices, size = 0.7):
+        #aug = naw.BackTranslationAug(max_length=self.max_comment_len) #inutilisable sans plus gros gpu
+        aug = naw.SynonymAug(aug_src='wordnet',aug_max=10)
+        self.src_samples, self.tgt_samples = copy(self.base_src), copy(self.base_tgt)
+        picks = np.random.choice(indices,size=int(size*len(indices)),replace=True).astype(int).tolist()
+        n = len(self.src_samples)
+        for i,pick in tqdm(enumerate(picks)):
+            translated = aug.augment(' '.join(self.tgt_samples[pick]))
+            self.src_samples.append(self.src_samples[pick])
+            self.tgt_samples.append(self._process(translated))
+            indices.append(n+i)
+        print(f'final train size: {len(self.src_samples)}')
+        return indices
 
 class BatchSamplerSimilarLength(Sampler):
     def __init__(self, dataset: IDLDataset, batch_size, indices=None, shuffle=True):

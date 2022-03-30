@@ -106,13 +106,13 @@ class TransformerEncoder(torch.nn.Module):
 
 
 
-def block_eye(n, size):
+def block_eye(n, size, device):
     """
     Create a block_diagonal matrix of n blocks, where each block
     is torch.eye(size)
     """
-    m1 = torch.ones(n, size, 1, size)
-    m2 = torch.eye(n).view(n, 1, n, 1)
+    m1 = torch.ones(n, size, 1, size,device=device)
+    m2 = torch.eye(n,device=device).view(n, 1, n, 1)
     return (m1*m2).view(n*size, n*size).to(torch.bool)
 
 
@@ -127,7 +127,7 @@ def build_pad_mask(source, ent_size, pad_idx):
                   .contiguous()
                   .view(source.size(1), -1, ent_size)
                   .eq(pad_idx))
-    # mask[:, :, 0] = 1  # we also mask the <ent> token
+    mask[:, :, 0] = 1  # we also mask the <ent> token
     return mask
 
 
@@ -140,8 +140,8 @@ def build_chunk_mask(lengths, ent_size, max_len= None):
     Filled with -inf where self-attention shouldn't attend, a zeros elsewhere.
     """
     ones = torch.div(lengths, ent_size, rounding_mode='floor')
-    ones = sequence_mask(ones, max_len=max_len).unsqueeze(1).repeat(1, max_len, 1).to(lengths.device)
-    mask = torch.full(ones.shape, float('-inf')).to(lengths.device)
+    ones = sequence_mask(ones, max_len=max_len).unsqueeze(1).repeat(1, max_len, 1)
+    mask = torch.full(ones.shape, float('-inf'),device=lengths.device)
     mask.masked_fill_(ones, 0)
     return mask
 
@@ -152,11 +152,11 @@ class HierarchicalTransformerEncoder(nn.Module):
     """
     def __init__(self, embeddings, units_layers=2, chunks_layers=2,
                  units_heads=2, chunks_heads=2, dim_feedforward=1000,
-                 units_glu_depth=-1, chunks_glu_depth=-1, dropout=.5):
+                 units_glu_depth=-1, chunks_glu_depth=-1, dropout=.5, use_kandv = True):
         super().__init__()
         self.embeddings = embeddings
         self.ent_size = HyperParameters.ENT_SIZE
-
+        self.use_key_value = use_kandv
         self.unit_encoder = TransformerEncoder(hidden_size=embeddings.embedding_size,
                                                heads=units_heads,
                                                num_layers=units_layers,
@@ -198,11 +198,11 @@ class HierarchicalTransformerEncoder(nn.Module):
         assert seq_len == lengths.max()
 
         # We build the masks for self attention and decoding
-        eye = block_eye(n_ents, self.ent_size).to(src.device)
-        self_attn_mask = torch.full((seq_len, seq_len), float('-inf')).to(src.device)
-        self_attn_mask.masked_fill_(eye.to(src.device), 0)
-        unit_mask = build_pad_mask(src, self.ent_size, self.embeddings.word_padding_idx).to(src.device)
-        chunk_mask = build_chunk_mask(lengths, self.ent_size, n_ents).to(src.device)
+        eye = block_eye(n_ents, self.ent_size, lengths.device)
+        self_attn_mask = torch.full((seq_len, seq_len), float('-inf'),device=src.device)
+        self_attn_mask.masked_fill_(eye, 0)
+        unit_mask = build_pad_mask(src, self.ent_size, self.embeddings.word_padding_idx)
+        chunk_mask = build_chunk_mask(lengths, self.ent_size, n_ents)
 
         # embs [seq_len, bs, hidden_size]
         embs, pos_embs = self.embeddings(src)
@@ -210,6 +210,9 @@ class HierarchicalTransformerEncoder(nn.Module):
         _check_for_nan(pos_embs, 'after embedding layer')
 
         # units [seq_len, bs, hidden_size]
+        # Pourquoi les pos sont pas passées dans l'unit encoder ?
+        # Réponse : ça se passe dans les table embeddings,
+        # le merge se fait dedans directement
         units = self.unit_encoder(embs, mask=self_attn_mask)
 
         # chunks & units_tokens [n_ents, bs, hidden_size]

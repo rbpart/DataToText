@@ -13,6 +13,9 @@ import os
 import shutil
 from torch.utils.data import random_split
 from torch.utils.data.sampler import Sampler
+from model.utils import bleu_score_
+
+
 class Trainer():
     def __init__(self, opts: HyperParameters = None, dataset: IDLDataset = None, test_dataset: IDLDataset = None,
                 optim: torch.optim.Optimizer = None, scheduler: torch.optim.lr_scheduler._LRScheduler = None,
@@ -55,7 +58,8 @@ class Trainer():
         newexp = f'experiment{maxi+1}'
         os.mkdir(self.opts.save_path+newexp)
         self.opts.save_path += newexp
-        self.runfile = self.writer.log_dir+ '/' + os.listdir(self.writer.log_dir)[0]
+        os.mkdir(self.opts.save_path + '/' + self.writer.log_dir.split('/')[-1])
+        self.runfile = self.writer.log_dir + '/' + os.listdir(self.writer.log_dir)[0]
         shutil.copyfile('model/parser.py','model/models/'+newexp+'/parser.py')
 
     def train_k_fold(self, nfolds, save_every = 1000, clip = None, accumulate = 1):
@@ -64,7 +68,7 @@ class Trainer():
             self.train_dataset = ConcatDataset(folds[0:i] + folds[i+1,nfolds])
             self.train_iterator = DataLoader(self.train_dataset, self.opts.batch_size,
                                     shuffle=True if not self.sampler else False,
-                                    sampler = self.sampler,
+                                    sampler = self.sampler, drop_last= True,
                                     pin_memory= True if self.opts.device == 'cuda' else False)
             self.valid_dataset = folds[i]
             self.valid_iterator = DataLoader(self.valid_dataset, self.opts.batch_size/2)
@@ -72,9 +76,9 @@ class Trainer():
             self.train(save_every, clip = clip, accumulate = accumulate)
         return
 
-    def train(self,save_every=1000, clip = None, accumulate = 1, validate_every=1):
+    def train(self,save_every=1000, clip = None, accumulate = 1, validate_every=1, augment_size = 0.7):
         if self.train_dataset is None:
-            self.train_valid_split(self.opts.train_size)
+            self.train_valid_split(self.opts.train_size, augment_size =augment_size)
         if self.checkpoint_file:
             last_epoch = self.scheduler.state_dict()['last_epoch']
             print(f'Starting training with batch size {self.opts.batch_size} from checkpoint at epoch {last_epoch}:')
@@ -90,7 +94,8 @@ class Trainer():
             if epoch % validate_every == 0:
                 self.model.eval()
                 valid_loss = self.evaluate(self.valid_dataset,self.valid_iterator)
-                self.report_epoch(epoch,start_time,train_loss,valid_loss)
+                scores = self.test(epoch)
+                self.report_epoch(epoch,start_time,train_loss,valid_loss,scores)
 
         self.save('final')
         if self.test_dataset:
@@ -107,7 +112,7 @@ class Trainer():
             batch_ = self.train_dataset[batch]
             out = self.model(batch_)
             batch_.target.tensor = batch_.target.tensor.transpose(1,0)
-            loss = self.criterion(out.transpose(1,2),batch_.target.tensor)
+            loss = self.criterion(out.transpose(1,2),batch_.target.tensor[:,1:])
             if self.opts.reduction == "mean":
                 loss /= accumulate
             loss.backward()
@@ -129,7 +134,7 @@ class Trainer():
 
     def report_iteration(self,epoch,iter,lr,loss,time, unclipped, clipped):
         self.times.append(time)
-        shutil.copy(self.runfile,self.opts.save_path)
+        shutil.copy(self.runfile,self.opts.save_path + '/' + self.writer.log_dir.split('/')[-1])
         print(f'| epoch {epoch:3d} | {iter:3d}/{int(self.num_batches)+1:3d} batches | '+
                   f'lr {lr:1.5f} | {time*1000:5.2f} ms/batch  | avg loss {loss:5.2f} | '+
                   f'ETA: {self.avg_time*(self.num_batches-iter):5.2f} min', end='\r')
@@ -138,7 +143,7 @@ class Trainer():
             self.writer.add_scalar('Training/UnclippedGrad',unclipped,iter+epoch*self.num_batches)
             self.writer.add_scalar('Training/NormOfClippedGrad',clipped,iter+epoch*self.num_batches)
 
-    def report_epoch(self,epoch,start_time,train_loss,valid_loss):
+    def report_epoch(self,epoch,start_time,train_loss,valid_loss,scores):
             print('-' * 100)
             print(f'| end of epoch {epoch:3d} | elapsed time: {(time.time()-start_time)/60:3.2f} min | '
                 f'avg train loss {train_loss/len(self.train_dataset):5.2f} | avg valid loss {valid_loss/len(self.valid_dataset):5.2f} ')
@@ -146,7 +151,8 @@ class Trainer():
             if self.writer is not None:
                 self.writer.add_scalar('Eval/AvgLossTrain',train_loss/len(self.train_dataset),epoch)
                 self.writer.add_scalar('Eval/AvgLossValid',valid_loss/len(self.valid_dataset),epoch)
-
+                for k,v in scores.items():
+                    self.writer.add_scalar(f'Eval/{k}Test',v,epoch)
 
     def evaluate(self, dataset, iterator: DataLoader):
         loss = 0
@@ -155,13 +161,29 @@ class Trainer():
                 batch_ = dataset[batch]
                 out = self.model(batch_)
                 batch_.target.tensor = batch_.target.tensor.transpose(1,0)
-                loss += self.criterion(out.transpose(1,2),batch_.target.tensor)
+                loss += self.criterion(out.transpose(1,2),batch_.target.tensor[:,1:])
         return loss
 
-    def train_valid_split(self, train_size = None, folds = None):
+    def test(self, epoch, test_size=4):
+        with torch.no_grad():
+            scores = {}
+            batch = torch.randint(0,len(self.test_dataset),(test_size,))
+            batch_ = self.test_dataset[batch]
+            batch_.target.tensor = batch_.target.tensor.transpose(1,0)
+            outputs = self.model.infer_to_sentence(batch_,
+                                                self.dataset.bos_word_idx,
+                                                self.dataset.eos_word_idx,
+                                                predictions=150,
+                                    beam_width=10, best = True,
+                                    block_n=3)
+            scores['bleu'] = bleu_score_(outputs,batch_.target.raw)
+            return scores
+
+    def train_valid_split(self, train_size = None, folds = None, augment_size = 0.7):
         if train_size is not None:
             train, valid = random_split(self.dataset, [int(len(self.dataset)*train_size),int(len(self.dataset)*(1-train_size))+1])
             self.train_dataset = train
+            self.train_dataset.indices = self.dataset.augment_data(train.indices, augment_size)
             self.train_iterator = DataLoader(self.train_dataset, self.opts.batch_size,
                                     shuffle=True if not self.sampler else False,
                                     sampler = self.sampler,
