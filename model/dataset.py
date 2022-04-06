@@ -1,4 +1,5 @@
 from collections import namedtuple
+import pickle
 from typing import List, Tuple
 import numpy as np
 from torch.utils.data import Dataset
@@ -12,8 +13,9 @@ from torch.nn.functional import one_hot
 from torchtext.vocab.vocab_factory import build_vocab_from_iterator
 from torchtext.vocab.vocab import Vocab
 from itertools import chain
-from copy import copy
+from copy import copy, deepcopy
 import nlpaug.augmenter.word as naw
+from nltk.tokenize import word_tokenize
 
 Entity =  namedtuple('Entity',('data','tags'))
 
@@ -42,6 +44,7 @@ class IDLDataset(Dataset):
         self.transform = transform
         self.opts = opts
         self.device = opts.device
+        self.tokenizer = pickle.load(open(opts.tokenizer,'rb'))
         self.src_pad_word = '<blank>'
         self.src_pad_feat = '<blank>'
         self.tgt_pad_word = '<blank>'
@@ -51,6 +54,8 @@ class IDLDataset(Dataset):
         self.load_tgt(getattr(opts,f'{type}_tgt'))
         self.bos_word_idx = self.tgt_vocab[self.bos_word]
         self.eos_word_idx = self.tgt_vocab[self.eos_word]
+        self.pad_word_idx = self.tgt_vocab[self.tgt_pad_word]
+
 
     def __len__(self):
         return len(self.src_samples)
@@ -105,7 +110,6 @@ class IDLDataset(Dataset):
             lenghts.append(leng)
             words.append(word)
             tags.append(tag)
-
         src = torch.tensor([words,tags], dtype=torch.long, device=self.device)
         lenghts = torch.tensor(lenghts,device = self.device, dtype=torch.long)
         return src, lenghts
@@ -124,10 +128,10 @@ class IDLDataset(Dataset):
         return  torch.tensor(paddeds, dtype=torch.long, device=self.device), lenghts, tokens
 
     def _preprocess_src(self,data):
-        return [re.sub('_',' ',string).lower() for string in data]
+        return [string.lower().strip().strip('_') for string in data]
 
     def _load_entity(self, entity:str, info_token = ' ', split_token = '|') -> Tuple:
-        data, tags = [], []
+        data, tags = ['<ent>'], ['<ent>']
         for info in entity.split(info_token):
             data.append(info.split(split_token)[0])
             tags.append(info.split(split_token)[1])
@@ -141,25 +145,26 @@ class IDLDataset(Dataset):
             samples = [self._load_entities(line.strip()) for line in tqdm(file.readlines()) if line != '']
         self.max_entities = np.max([len(samp) for samp in samples])
         self.src_samples : List[Entity] = samples
-        self.base_src = copy(self.src_samples)
+        self.base_src = deepcopy(self.src_samples)
         self.src_vocab : Vocab = torch.load(self.opts.src_word_vocab)
         self.src_vocab_feat : Vocab = torch.load(self.opts.src_feat_vocab)
 
     def _process(self,line:str):
         s = line.replace(r'\n','').lower()
-        # s = re.sub('([.,!?()])', r' \1 ', s)
-        # s = re.sub('\s{2,}', ' ', s)
-        s = re.sub(r'[^\w\s]','',s) # punctuationless for now
-        return s.split(' ')
+        s = re.sub('<eos>','',s)
+        s = re.sub('<bos>','',s)
+        s = re.sub('([.,!?()])', r'\1 ', s)
+        s = re.sub('\s{2,}', ' ', s)
+        tokenized = self.tokenizer.tokenize(word_tokenize(s))
+        return ['<bos>'] + tokenized + ['<eos>']
 
     def load_tgt(self,path):
         with open(path,'r') as file:
             samples = [self._process(line) for line in tqdm(file.readlines()) if line != '']
         self.max_comment_len = np.max([len(samp) for samp in samples])
         self.tgt_samples : List[str] = samples
-        self.base_tgt = copy(self.tgt_samples)
+        self.base_tgt = deepcopy(self.tgt_samples)
         self.tgt_vocab : Vocab = torch.load(self.opts.tgt_vocab)
-        self.len_tgt_vocab = len(self.tgt_vocab)
 
     def _gen_src_map(self,src_words):
         data = [list(chain.from_iterable([ent.data for ent in sample])) for sample in src_words]
@@ -173,7 +178,7 @@ class IDLDataset(Dataset):
         return src_map, fused_vocab
 
     def fuse_vocabs(self,vocab_base: Vocab,vocab_extension: Vocab):
-        newvocab = copy(vocab_base)
+        newvocab = deepcopy(vocab_base)
         itos = vocab_base.get_itos()
         itos_ex = vocab_extension.get_itos()
         for w in (set(itos_ex) - set(itos)):
@@ -186,19 +191,23 @@ class IDLDataset(Dataset):
         self.src_samples, self.tgt_samples = copy(self.base_src), copy(self.base_tgt)
         picks = np.random.choice(indices,size=int(size*len(indices)),replace=True).astype(int).tolist()
         n = len(self.src_samples)
+        processed = []
         for i,pick in tqdm(enumerate(picks)):
             translated = aug.augment(' '.join(self.tgt_samples[pick]))
+            processed += self._process(translated)
             self.src_samples.append(self.src_samples[pick])
             self.tgt_samples.append(self._process(translated))
             indices.append(n+i)
         print(f'final train size: {len(self.src_samples)}')
+        self.tgt_vocab = self.fuse_vocabs(self.tgt_vocab, build_vocab_from_iterator(processed))
+        self.len_tgt_vocab = len(self.tgt_vocab)
         return indices
 
 class BatchSamplerSimilarLength(Sampler):
     def __init__(self, dataset: IDLDataset, batch_size, indices=None, shuffle=True):
         self.batch_size = batch_size
         self.shuffle = shuffle
-        # get the indicies and length
+        # get the indices and length
         self.indices = [(i, batch.source.lens) for i, batch in enumerate(dataset)]
         # if indices are passed, then use only the ones passed (for ddp)
         if indices is not None:
