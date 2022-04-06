@@ -67,7 +67,7 @@ def beam_search(model,
         batch.target.tensor = Y
         # The next command can be a memory bottleneck, can be controlled with the batch
         # size of the predict method.
-        next_probabilities = model.forward(batch,inference=True)[:, -1, :]
+        next_probabilities = model.forward(batch,inference=True)[0][:, -1, :]
         vocabulary_size = model.decoder.embeddings.num_embeddings
         extended_vocabulary_size = next_probabilities.shape[-1]
         probabilities, next_chars = next_probabilities.squeeze().log_softmax(-1)\
@@ -105,7 +105,7 @@ def beam_search(model,
                             batch.vocab,
                             Target(torch.where(y>=vocabulary_size,0,y),None,None))
                 next_probabilities.append(
-                    model.forward(batch_,inference=True)[:, -1, :].log_softmax(-1))
+                    model.forward(batch_,inference=True)[0][:, -1, :].log_softmax(-1))
             next_probabilities = torch.cat(next_probabilities, axis = 0)
             next_probabilities = next_probabilities.reshape((-1, beam_width, next_probabilities.shape[-1]))
             probabilities = probabilities.unsqueeze(-1) + next_probabilities

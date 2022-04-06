@@ -44,7 +44,7 @@ class Fetcher():
     def fetch_country(self,data):
         response = requests.get(self.entityurl+data['es_data']['entity']['uid'])
         if response.status_code == 200:
-            tx= json.loads(response.text)[0]
+            tx= json.loads(response.text)['data'][0]
             if 'country' in tx:
                 return tx['country']
         return None

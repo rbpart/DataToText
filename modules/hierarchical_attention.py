@@ -113,7 +113,7 @@ class HierarchicalAttention(torch.nn.Module):
         # assert not coverage
 
         self.ent_size = HyperParameters.ENT_SIZE
-
+        self.pad_word_idx = 1
         self.use_pos = use_pos
 
         # dims shenanigans. memory_bank should be dim[0]
@@ -196,6 +196,7 @@ class HierarchicalAttention(torch.nn.Module):
         # compute attention scores, as in Luong et al.
         # align_units is [batch_size, src_len]
         # align_chunks is [batch_size, 1, n_ents]
+        #TODO : masking on the sentence padding
         if self.use_pos:
             align_units = self.unit_scorer(source, pos_embs).squeeze(1)
         else:
@@ -245,7 +246,6 @@ class HierarchicalAttention(torch.nn.Module):
         # each context vector c_t is the weighted average
         # over all the source hidden states
         c = torch.bmm(align_vectors, memory_bank)
-
         # concatenate
         concat_c = torch.cat([c, source], 2).view(batch_size*target_l, dim*2)
         attn_h = self.linear_out(concat_c).view(batch_size, target_l, dim)
@@ -269,7 +269,6 @@ class HierarchicalAttention(torch.nn.Module):
             '_align_chunks': align_chunks.squeeze(1),
             '_align_units':align_units.squeeze(1)
         }
-
         return attn_h, ret
 
 

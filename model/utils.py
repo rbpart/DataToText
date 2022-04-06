@@ -1,10 +1,13 @@
 from itertools import tee
+import math
 import torch
 import json
 from model.parser import HyperParameters
 from tqdm import tqdm
 from torchtext.data.metrics import bleu_score
-from typing import List, Union
+from typing import List, Union, no_type_check_decorator
+import seaborn as sns
+import matplotlib.pyplot as plt
 hparams = HyperParameters()
 
 def aeq(*args):
@@ -47,7 +50,7 @@ def run_inference(model,preprocessed_srcs,dataset, hparms = hparams):
     model.eval()
     with torch.no_grad():
         for i in tqdm(range(1,dataset.max_comment_len)):
-            out = model(preprocessed_srcs,tgt[:i,:])
+            out, attns = model(preprocessed_srcs,tgt[:i,:])
             tgt[i,:] = out.argmax(2).transpose(0,1)[i-1,:]
     model.train()
     return tgt
@@ -92,3 +95,15 @@ def damerau_levenshtein_distance(s1, s2):
                 d[(i,j)] = min (d[(i,j)], d[i-2,j-2] + cost) # transposition
 
     return d[lenstr1-1,lenstr2-1]
+
+def plot_attention(batch,attns, batch_item = 0, ent = 0,types=['std','coverage']):
+    sns.set()
+    fig, axes = plt.subplots(1,len(types),figsize=(20,10))
+    for i,type in enumerate(types):
+        att = attns[type][:,batch_item,(ent)*hparams.ENT_SIZE:(ent+1)*hparams.ENT_SIZE].detach().numpy()
+        x = [d if d != '<blank>' else '' for d in batch.source.raw[batch_item][ent].data]
+        sns.heatmap(att, cmap='RdBu_r', ax=axes[i])
+        axes[i].set_title(type)
+        axes[i].set_yticks([i for i,d in enumerate(batch.target.raw[batch_item])], [i if i !='<blank>' else '' for i in batch.target.raw[batch_item]], rotation=math.pi/2+0.1)
+        axes[i].set_xticks([i+0.5 for i in range(len(x))],x,rotation = 45)
+    return fig
