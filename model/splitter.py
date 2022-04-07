@@ -23,3 +23,17 @@ class Splitter():
             self.folds = folds
             return folds
 
+    # TODO : pass in the splitter
+    # def folds(self, nfolds, save_every = 1000, clip = None, accumulate = 1):
+    #     folds = self.train_valid_split(folds=nfolds)
+    #     for i in range(folds):
+    #         self.train_dataset = ConcatDataset(folds[0:i] + folds[i+1,nfolds])
+    #         self.train_iterator = DataLoader(self.train_dataset, self.opts.batch_size,
+    #                                 shuffle=True if not self.sampler else False,
+    #                                 sampler = self.sampler, drop_last= True,
+    #                                 pin_memory= True if self.opts.device == 'cuda' else False)
+    #         self.valid_dataset = folds[i]
+    #         self.valid_iterator = DataLoader(self.valid_dataset, self.opts.batch_size/2)
+    #         self.num_batches = int(len(self.train_dataset)/self.opts.batch_size)
+    #         self.train(save_every, clip = clip, accumulate = accumulate)
+    #     return
