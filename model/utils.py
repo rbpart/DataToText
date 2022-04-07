@@ -100,10 +100,12 @@ def plot_attention(batch,attns, batch_item = 0, ent = 0,types=['std','coverage']
     sns.set()
     fig, axes = plt.subplots(1,len(types),figsize=(20,10))
     for i,type in enumerate(types):
-        att = attns[type][:,batch_item,(ent)*hparams.ENT_SIZE:(ent+1)*hparams.ENT_SIZE].detach().numpy()
-        x = [d if d != '<blank>' else '' for d in batch.source.raw[batch_item][ent].data]
+        leng = batch.target.lens[batch_item]
+        att = attns[type][:leng,batch_item,(ent)*hparams.ENT_SIZE:(ent+1)*hparams.ENT_SIZE].detach().numpy()
+        x = [d for d in batch.source.raw[batch_item][ent].data if d != '<blank']
+        y = [i for i in batch.target.raw[batch_item] if i !='<blank>']
         sns.heatmap(att, cmap='RdBu_r', ax=axes[i])
         axes[i].set_title(type)
-        axes[i].set_yticks([i for i,d in enumerate(batch.target.raw[batch_item])], [i if i !='<blank>' else '' for i in batch.target.raw[batch_item]], rotation=math.pi/2+0.1)
+        axes[i].set_yticks([i for i in range(len(y))],y, rotation=math.pi/2+0.1)
         axes[i].set_xticks([i+0.5 for i in range(len(x))],x,rotation = 45)
     return fig
