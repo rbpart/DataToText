@@ -1,4 +1,5 @@
 from collections import namedtuple
+import pickle
 from typing import List, Tuple
 import numpy as np
 from torch.utils.data import Dataset
@@ -14,6 +15,7 @@ from torchtext.vocab.vocab import Vocab
 from itertools import chain
 from copy import copy
 import nlpaug.augmenter.word as naw
+from nltk.tokenize import word_tokenize
 
 Entity =  namedtuple('Entity',('data','tags'))
 
@@ -47,6 +49,7 @@ class IDLDataset(Dataset):
         self.tgt_pad_word = '<blank>'
         self.bos_word = '<bos>'
         self.eos_word = '<eos>'
+        self.tokenizer = pickle.load(open(opts.tokenizer,'rb'))
         self.load_src(getattr(opts,f'{type}_src'))
         self.load_tgt(getattr(opts,f'{type}_tgt'))
         self.bos_word_idx = self.tgt_vocab[self.bos_word]
@@ -147,10 +150,12 @@ class IDLDataset(Dataset):
 
     def _process(self,line:str):
         s = line.replace(r'\n','').lower()
-        # s = re.sub('([.,!?()])', r' \1 ', s)
-        # s = re.sub('\s{2,}', ' ', s)
-        s = re.sub(r'[^\w\s]','',s) # punctuationless for now
-        return s.split(' ')
+        s = re.sub('<eos>','',s)
+        s = re.sub('<bos>','',s)
+        s = re.sub('([.,!?()])', r'\1 ', s)
+        s = re.sub('\s{2,}', ' ', s)
+        tokenized = self.tokenizer.tokenize(word_tokenize(s))
+        return ['<bos>'] + tokenized + ['<eos>']
 
     def load_tgt(self,path):
         with open(path,'r') as file:

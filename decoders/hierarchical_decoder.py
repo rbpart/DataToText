@@ -42,7 +42,7 @@ class HierarchicalRNNDecoder(RNNDecoderBase):
     """
     def __init__(self, rnn_type, bidirectional_encoder, num_layers,
                  hidden_size, attn_type="general", attn_func="softmax",
-                 coverage_attn=False, context_gate=None,
+                 coverage_attn=False, context_gate=None, forcing_frequency=1,
                  copy_attn=False, dropout=0.0, embeddings: torch.nn.Embedding = None,
                  reuse_copy_attn=False, copy_attn_type="general", use_pos=True):
         super(RNNDecoderBase, self).__init__(
@@ -51,7 +51,7 @@ class HierarchicalRNNDecoder(RNNDecoderBase):
         # assert not coverage_attn
         coverage_attn = False
         self.ent_size = HyperParameters.ENT_SIZE
-
+        self.forcing_frequency = forcing_frequency
         self.bidirectional_encoder = bidirectional_encoder
         self.num_layers = num_layers
 
@@ -179,7 +179,11 @@ class HierarchicalRNNDecoder(RNNDecoderBase):
         # Input feed concatenates hidden state with
         # input at every time step.
         for emb_t in emb.split(1):
-            decoder_input = torch.cat([emb_t.squeeze(0), input_feed], 1)
+            if torch.rand(1) < self.forcing_frequency:
+                next = emb_t
+            else:
+                next = decoder_output.argmax(dim=-1)
+            decoder_input = torch.cat([next.squeeze(0), input_feed], 1)
             rnn_output, dec_state = self.rnn(decoder_input, dec_state)
 
             # If the RNN has several layers, we only use the last one to compute

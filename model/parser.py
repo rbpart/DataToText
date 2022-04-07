@@ -31,6 +31,8 @@ class HyperParameters(ArgumentParser):
     accumulate=8
     clip =1.0
     use_pos = True
+    forcing_frequency = 1
+    tokenizer ='datasets/idl/tokenizer.pickle'
 
     def __init__(self) -> None:
         super().__init__(self)

@@ -175,7 +175,9 @@ class Trainer():
                                                 self.dataset.eos_word_idx,
                                                 predictions=150,
                                     beam_width=10, best = True,
-                                    block_n=3)
+                                    block_n=3, progress_bar=False)
+            self.writer.add_text('Test/Predictions','  \n'.join(outputs),epoch)
+            self.writer.add_text('Test/Target','  \n'.join([' '.join(s) for s in batch_.target.raw]).replace('<blank>',''),epoch)
             scores['bleu'] = bleu_score_(outputs,batch_.target.raw)
             return scores
 

@@ -10,7 +10,7 @@ from torch.utils.tensorboard.writer import SummaryWriter
 if __name__=="__main__":
     writer = SummaryWriter()
     hparameters = HyperParameters()
-    dataset = IDLDataset(hparameters, 'train')
+    dataset = IDLDataset(hparameters, 'test')
     test_dataset = IDLDataset(hparameters, 'test')
     #sampler = BatchSamplerSimilarLength(dataset,hparameters.batch_size,shuffle=True)
     model = build_model(hparameters,dataset)
