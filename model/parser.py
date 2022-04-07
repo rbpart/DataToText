@@ -3,7 +3,7 @@ from argparse import ArgumentParser
 import torch
 
 class HyperParameters(ArgumentParser):
-    ENT_SIZE = 8
+    ENT_SIZE = 10
     base = 'datasets/idl/'
     src_word_vocab = base + 'src_word.vocab.pt'
     src_feat_vocab = base + 'src_feat.vocab.pt'

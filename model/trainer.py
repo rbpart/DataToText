@@ -183,7 +183,6 @@ class Trainer():
         if train_size is not None:
             train, valid = random_split(self.dataset, [int(len(self.dataset)*train_size),int(len(self.dataset)*(1-train_size))+1])
             self.train_dataset = train
-            self.train_dataset.indices = self.dataset.augment_data(train.indices, augment_size)
             self.train_iterator = DataLoader(self.train_dataset, self.opts.batch_size,
                                     shuffle=True if not self.sampler else False,
                                     sampler = self.sampler,

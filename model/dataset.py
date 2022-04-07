@@ -124,7 +124,7 @@ class IDLDataset(Dataset):
         return  torch.tensor(paddeds, dtype=torch.long, device=self.device), lenghts, tokens
 
     def _preprocess_src(self,data):
-        return [re.sub('_',' ',string).lower() for string in data]
+        return [string.lower().strip('_') for string in data]
 
     def _load_entity(self, entity:str, info_token = ' ', split_token = '|') -> Tuple:
         data, tags = [], []

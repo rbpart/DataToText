@@ -26,10 +26,9 @@ if __name__=="__main__":
                     optim, lr_scheduler, criterion,
                     model, writer=writer, create_experiment=True)
 
-    trainer.test(0)
     trainer.train(save_every=1500,
                 accumulate=hparameters.accumulate,
                 clip=hparameters.clip,
                 validate_every=1,
-                augment_size=0.8)
+                augment_size=0)
 # %%
