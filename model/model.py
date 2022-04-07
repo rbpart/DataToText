@@ -69,7 +69,7 @@ class DataToTextModel(nn.Module):
         if "std" in attns: # et la copy attention elle sert a quoi ?
             attn = attns["std"]
             attn_key = 'std'
-        return  self.generator(dec_out,attn,batch.source.map).transpose(0,1)
+        return  self.generator(dec_out,attn,batch.source.map).transpose(0,1), attns
 
     #Utilitaries for the model
 

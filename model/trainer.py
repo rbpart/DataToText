@@ -8,6 +8,7 @@ from model.dataset import IDLDataset
 import torch
 from model.parser import HyperParameters
 from model.model import DataToTextModel
+from model.build_model import build_decoder
 import time
 import os
 import shutil
@@ -17,7 +18,8 @@ from model.utils import bleu_score_
 
 
 class Trainer():
-    def __init__(self, opts: HyperParameters = None, dataset: IDLDataset = None, test_dataset: IDLDataset = None,
+    def __init__(self, opts: HyperParameters = None, dataset: IDLDataset = None,
+                train_dataset: IDLDataset = None,valid_dataset: IDLDataset = None, test_dataset: IDLDataset = None,
                 optim: torch.optim.Optimizer = None, scheduler: torch.optim.lr_scheduler._LRScheduler = None,
                 criterion: nn.Module = None, model: DataToTextModel = None, checkpoint_file = None,
                 writer: SummaryWriter = None, sampler: Sampler = None, create_experiment = False) -> None:
@@ -33,11 +35,12 @@ class Trainer():
         else:
             raise ValueError('Either provide a path to load checkpoint or provide all the required arguments to create a new model')
 
-        if None not in [opts,dataset, criterion]:
+        if None not in [opts, criterion]:
             self.opts = opts
-            self.dataset = dataset
             self.criterion = criterion
-            self.train_dataset = None
+            self.dataset =dataset
+            self.train_dataset = train_dataset
+            self.valid_dataset = valid_dataset
         else:
             raise ValueError('Criterion and train and valid datasets should always be provided')
 
@@ -47,6 +50,8 @@ class Trainer():
             self.test_iterator = DataLoader(test_dataset, opts.batch_size)
         if create_experiment:
             self.create_experiment()
+        self.build_iterators()
+
     @property
     def avg_time(self):
         return np.mean(self.times)
@@ -76,16 +81,13 @@ class Trainer():
             self.train(save_every, clip = clip, accumulate = accumulate)
         return
 
-    def train(self,save_every=1000, clip = None, accumulate = 1, validate_every=1, augment_size = 0.7):
-        if self.train_dataset is None:
-            self.train_valid_split(self.opts.train_size, augment_size =augment_size)
+    def train(self,save_every=1000, clip = None, accumulate = 1, validate_every=1):
         if self.checkpoint_file:
             last_epoch = self.scheduler.state_dict()['last_epoch']
             print(f'Starting training with batch size {self.opts.batch_size} from checkpoint at epoch {last_epoch}:')
         else:
             last_epoch = 0
             print(f'Starting training with batch size {self.opts.batch_size} from beginning')
-
         for epoch in range(last_epoch, self.opts.num_epochs):
             self.times = []
             start_time= time.time()
@@ -110,7 +112,7 @@ class Trainer():
             global_step = epoch*self.num_batches + i
             running_time = time.time()
             batch_ = self.train_dataset[batch]
-            out = self.model(batch_)
+            out,attns = self.model(batch_)
             batch_.target.tensor = batch_.target.tensor.transpose(1,0)
             loss = self.criterion(out.transpose(1,2),batch_.target.tensor[:,1:])
             if self.opts.reduction == "mean":
@@ -159,7 +161,7 @@ class Trainer():
         with torch.no_grad():
             for batch in iterator.batch_sampler:
                 batch_ = dataset[batch]
-                out = self.model(batch_)
+                out,attns = self.model(batch_)
                 batch_.target.tensor = batch_.target.tensor.transpose(1,0)
                 loss += self.criterion(out.transpose(1,2),batch_.target.tensor[:,1:])
         return loss
@@ -173,30 +175,21 @@ class Trainer():
             outputs = self.model.infer_to_sentence(batch_,
                                                 self.dataset.bos_word_idx,
                                                 self.dataset.eos_word_idx,
-                                                predictions=150,
-                                    beam_width=10, best = True,
-                                    block_n=3)
+                                                predictions=batch_.target.lens.max(),
+                                                beam_width=10, best = True,
+                                                block_n=3, progress_bar=False)
             scores['bleu'] = bleu_score_(outputs,batch_.target.raw)
+            targets = '  \n'.join([' '.join(s) for s in batch_.target.raw]).replace('<blank>','')
+            self.writer.add_text('Eval/Outputs','  \n'.join(outputs),epoch)
+            self.writer.add_text('Eval/Target',targets,epoch)
             return scores
 
-    def train_valid_split(self, train_size = None, folds = None, augment_size = 0.7):
-        if train_size is not None:
-            train, valid = random_split(self.dataset, [int(len(self.dataset)*train_size),int(len(self.dataset)*(1-train_size))+1])
-            self.train_dataset = train
-            self.train_dataset.indices = self.dataset.augment_data(train.indices, augment_size)
-            self.train_iterator = DataLoader(self.train_dataset, self.opts.batch_size,
-                                    shuffle=True if not self.sampler else False,
-                                    sampler = self.sampler,
-                                    pin_memory= True if self.opts.device == 'cuda' else False)
-            self.valid_dataset = valid
-            self.valid_iterator = DataLoader(self.valid_dataset, self.opts.batch_size)
-            self.num_batches = int(len(self.train_dataset)/self.opts.batch_size)
-            return
-        if folds is not None:
-            lengths = [int(len(self.dataset)/folds)]
-            folds = random_split(self.dataset, lengths)
-            return folds
-        raise
+    def build_iterators(self):
+        self.train_iterator = DataLoader(self.train_dataset,
+        self.opts.batch_size,shuffle=True,
+        pin_memory=True)
+        self.valid_iterator = DataLoader(self.valid_dataset,self.opts.batch_size)
+        self.num_batches = int(len(self.train_dataset)/self.opts.batch_size)
 
     def scheduler_(self, value = None):
         if type(self.scheduler) == torch.optim.lr_scheduler.ReduceLROnPlateau:

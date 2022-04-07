@@ -1,4 +1,4 @@
-from collections import namedtuple
+from collections import Counter, namedtuple
 import pickle
 from typing import List, Tuple
 import numpy as np
@@ -202,6 +202,13 @@ class IDLDataset(Dataset):
         self.tgt_vocab = self.fuse_vocabs(self.tgt_vocab, build_vocab_from_iterator(processed))
         self.len_tgt_vocab = len(self.tgt_vocab)
         return indices
+
+    def calculate_vocab_weights(self):
+        counter = Counter()
+        for samp in self.tgt_samples:
+            counter.update(samp)
+        tgt_vocab_weights = [1/counter[w]**(1/4) for w in self.tgt_vocab.get_itos()]
+        return tgt_vocab_weights
 
 class BatchSamplerSimilarLength(Sampler):
     def __init__(self, dataset: IDLDataset, batch_size, indices=None, shuffle=True):

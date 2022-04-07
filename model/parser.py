@@ -3,7 +3,7 @@ from argparse import ArgumentParser
 import torch
 
 class HyperParameters(ArgumentParser):
-    ENT_SIZE = 8
+    ENT_SIZE = 9 +1
     base = 'datasets/idl/'
     src_word_vocab = base + 'src_word.vocab.pt'
     src_feat_vocab = base + 'src_feat.vocab.pt'
@@ -21,7 +21,7 @@ class HyperParameters(ArgumentParser):
     key_and_value = True
     dropout = [0.5]
     batch_size = 8
-    num_epochs = 50
+    num_epochs = 100
     learning_rate = 0.001
     device = "cuda" if torch.cuda.is_available() else "cpu"
     save_path = "model/models/"
@@ -31,6 +31,7 @@ class HyperParameters(ArgumentParser):
     accumulate=8
     clip =1.0
     use_pos = True
+    tokenizer = 'datasets/idl/tokenizer.pickle'
 
     def __init__(self) -> None:
         super().__init__(self)

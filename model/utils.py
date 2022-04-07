@@ -96,7 +96,7 @@ def damerau_levenshtein_distance(s1, s2):
 
     return d[lenstr1-1,lenstr2-1]
 
-def plot_attention(batch,attns, batch_item = 0, ent = 0,types=['std','coverage']):
+def plot_attention(batch,attns, batch_item = 0, ent = 0,types=['std']):
     sns.set()
     fig, axes = plt.subplots(1,len(types),figsize=(20,10))
     for i,type in enumerate(types):
