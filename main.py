@@ -12,7 +12,7 @@ if __name__=="__main__":
     hparameters = HyperParameters()
     dataset = IDLDataset(hparameters, 'train')
     train_dataset, valid_dataset = Splitter.train_valid_split(dataset,
-                        hparameters.train_size,augment_size=0.5)
+                        hparameters.train_size,augment_size=0)
     test_dataset = IDLDataset(hparameters, 'test')
     #sampler = BatchSamplerSimilarLength(dataset,hparameters.batch_size,shuffle=True)
     model = build_model(hparameters,dataset)
@@ -27,7 +27,7 @@ if __name__=="__main__":
     trainer = Trainer(hparameters, dataset, train_dataset, valid_dataset, test_dataset,
                     optim, lr_scheduler, criterion,
                     model, writer=writer, create_experiment=True)
-    trainer.test(0)
+
     trainer.train(save_every=1500,
                 accumulate=hparameters.accumulate,
                 clip=hparameters.clip,

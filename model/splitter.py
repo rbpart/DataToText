@@ -15,7 +15,8 @@ class Splitter():
         if train_size is not None:
             train, valid = random_split(dataset, [int(len(dataset)*train_size),int(len(dataset)*(1-train_size))+1])
             train_dataset = train
-            train_dataset.indices = dataset.augment_data(train.indices, augment_size)
+            if augment_size >0:
+                train_dataset.indices = dataset.augment_data(train.indices, augment_size)
             valid_dataset = valid
             return train_dataset, valid_dataset
         if folds is not None:

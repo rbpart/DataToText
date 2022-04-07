@@ -113,7 +113,7 @@ class HierarchicalRNNDecoder(RNNDecoderBase):
         if self._reuse_copy_attn and not self.attentional:
             raise ValueError("Cannot reuse copy attention with no attention.")
 
-    def init_state(self, src, memory_bank, encoder_final):
+    def init_state(self, encoder_final):
         """
         Here we initialize the hidden state of the hierarchical_decoder
         This function only works with the hierarchical_transformer.
@@ -212,7 +212,7 @@ class HierarchicalRNNDecoder(RNNDecoderBase):
 
             # Update the coverage attention.
             if self._coverage:
-                coverage = p_attn if coverage is None else p_attn + coverage
+                coverage = decoder_output if coverage is None else decoder_output + coverage
                 attns.setdefault('coverage', list())
                 attns['coverage'].append(coverage)
 

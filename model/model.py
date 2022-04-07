@@ -53,7 +53,7 @@ class DataToTextModel(nn.Module):
             * dictionary attention dists of ``(tgt_len, batch, src_len)``
         """
         if not inference:
-            dec_in = batch.target.tensor[:-1]
+            dec_in = torch.where(batch.target.tensor == self.dataset.eos_word_idx,self.dataset.pad_word_idx,batch.target.tensor)[:-1]
         else:
             dec_in = batch.target.tensor
         enc_state, memory_bank, lengths = self.encoder(batch.source.tensor , lengths = batch.source.lens)
@@ -61,14 +61,15 @@ class DataToTextModel(nn.Module):
         if hidden_state is not None:
             self.decoder.state['hidden'] = hidden_state
         else:
-            self.decoder.init_state(batch.source.tensor, memory_bank, enc_state)
+            self.decoder.init_state(enc_state)
 
         dec_out, attns = self.decoder(dec_in, memory_bank,
                                     memory_lengths=lengths,
                                     with_align=with_align)
-        if "std" in attns: # et la copy attention elle sert a quoi ?
+        if "copy" in attns: # et la copy attention elle sert a quoi ?
+            attn = attns["copy"]
+        else:
             attn = attns["std"]
-            attn_key = 'std'
         return  self.generator(dec_out,attn,batch.source.map).transpose(0,1), attns
 
     #Utilitaries for the model
