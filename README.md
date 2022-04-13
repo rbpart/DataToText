@@ -13,4 +13,4 @@ Il est possible de suivre l'évolution des sorties et des métriques du modèles
 1. L'inférence se fait sur le dataset de test
 
 2. Pour lancer l'inférence :
-- python3 inference
+- python3 infer
